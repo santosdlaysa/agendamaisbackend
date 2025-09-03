@@ -21,8 +21,11 @@ def create_app():
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'jwt-secret-string')
     
-    # Extensões
-    CORS(app, origins=['http://localhost:3000', 'http://localhost:5173'])
+    # Extensões - configurar CORS para produção e desenvolvimento
+    if os.getenv('FLASK_ENV') == 'production':
+        CORS(app)  # Permite todos os origins em produção
+    else:
+        CORS(app, origins=['http://localhost:3000', 'http://localhost:5173'])
     JWTManager(app)
     db.init_app(app)
     
@@ -41,4 +44,6 @@ def create_app():
 
 if __name__ == '__main__':
     app = create_app()
-    app.run(debug=True, port=5000)
+    port = int(os.getenv('PORT', 5000))
+    debug = os.getenv('FLASK_ENV') == 'development'
+    app.run(debug=debug, host='0.0.0.0', port=port)

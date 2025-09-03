@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: agendamais-backend
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: agendamais-db
+          property: connectionString
+
+databases:
+  - name: agendamais-db
+    databaseName: agendamais
+    user: agendamais_user
