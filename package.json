@@ -1,0 +1,15 @@
+{
+  "name": "agendamento-mvp",
+  "version": "1.0.0",
+  "description": "Sistema de Agendamento MVP - Backend Flask + Frontend React",
+  "scripts": {
+    "dev": "concurrently \"npm run backend\" \"npm run frontend\"",
+    "backend": "cd backend && python run.py",
+    "frontend": "cd frontend && npm run dev",
+    "install:all": "cd backend && pip install -r requirements.txt && cd ../frontend && npm install",
+    "build": "cd frontend && npm run build"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

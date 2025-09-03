@@ -1,0 +1,13 @@
+// Exemplo inicial, adapte conforme o markdown
+// datasource e generator
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Models conforme o markdown...
