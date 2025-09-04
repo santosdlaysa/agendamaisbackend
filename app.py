@@ -22,16 +22,16 @@ def create_app():
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'jwt-secret-string')
     
-    # Configuração CORS corrigida
+    # Configuração CORS
     allowed_origins = [
         'http://localhost:3000',
         'http://localhost:5173',
         'http://172.29.16.1:3001',
-        # Adicione aqui o domínio do seu front-end em produção
-        os.getenv('FRONTEND_URL'),  # Ex: https://seuapp.vercel.app
+        'https://agendamais-x19j-32f6fx9yd-santosdlaysas-projects.vercel.app',
+        os.getenv('FRONTEND_URL')
     ]
 
-    # Remove None values
+    # Remove valores None/vazios
     allowed_origins = [origin for origin in allowed_origins if origin]
 
     CORS(app,
