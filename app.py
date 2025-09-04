@@ -28,8 +28,7 @@ def create_app():
         'http://localhost:5173',
         'http://172.29.16.1:3001',
         'https://agendamais-x19j-32f6fx9yd-santosdlaysas-projects.vercel.app',
-        'https://agendamais-x19j.vercel.app'
-        'http://localhost:3002',
+        'https://agendamais-x19j.vercel.app',
         os.getenv('FRONTEND_URL')
     ]
 
