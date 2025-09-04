@@ -22,11 +22,24 @@ def create_app():
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'jwt-secret-string')
     
-    # Extensões - configurar CORS para produção e desenvolvimento
-    if os.getenv('FLASK_ENV') == 'production':
-        CORS(app)  # Permite todos os origins em produção
-    else:
-        CORS(app, origins=['http://localhost:3000', 'http://localhost:5173', 'http://172.29.16.1:3001'])
+    # Configuração CORS corrigida
+    allowed_origins = [
+        'http://localhost:3000',
+        'http://localhost:5173',
+        'http://172.29.16.1:3001',
+        # Adicione aqui o domínio do seu front-end em produção
+        os.getenv('FRONTEND_URL'),  # Ex: https://seuapp.vercel.app
+    ]
+
+    # Remove None values
+    allowed_origins = [origin for origin in allowed_origins if origin]
+
+    CORS(app,
+         origins=allowed_origins,
+         methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+         allow_headers=['Content-Type', 'Authorization'],
+         supports_credentials=True)
+
     JWTManager(app)
     db.init_app(app)
     
