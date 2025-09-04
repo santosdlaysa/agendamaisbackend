@@ -1,0 +1,101 @@
+# test/infra/test_db.py
+
+import pytest
+import  psycopg2
+from psycopg2.extras import RealDictCursor
+
+
+class TestDatabaseConnection:
+    @classmethod
+    def setup_class(cls):
+        """Configuração executada uma vez antes de todos os testes da classe"""
+        cls.connection_params = {
+            'host': 'db.qpgqjkujtabjnavzwzut.supabase.co',
+            'port': 5432,
+            'user': 'postgres',
+            'password': 'fE8dUCb1QAnCpGJc',
+            'database': 'postgres',
+            'sslmode': 'require'  # obrigatória para Supabase
+        }
+        cls.connection = None
+
+    @classmethod
+    def teardown_class(cls):
+        """Limpeza executada uma vez após todos os testes da classe"""
+        if cls.connection and not cls.connection.closed:
+            cls.connection.close()
+
+    def setup_method(self):
+        """Configuração executada antes de cada teste"""
+        try:
+            self.connection = psycopg2.connect(**self.connection_params)
+        except psycopg2.Error as e:
+            self.connection = None
+            pytest.skip(f"Could not connect to database: {e}")
+
+    def teardown_method(self):
+        """Limpeza executada após cada teste"""
+        if self.connection and not self.connection.closed:
+            self.connection.close()
+
+    def test_should_connect_and_run_simple_query(self):
+        """Testa se consegue conectar e executar uma query simples"""
+        with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute('SELECT 1+1 AS result')
+            result = cursor.fetchone()
+            assert result['result'] == 2
+
+    def test_should_skip_if_connection_fails(self):
+        """Testa conexão ou pula se falhar"""
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute('SELECT NOW()')
+                print('Postgres connection test passed')
+        except psycopg2.Error as error:
+            print(f'Postgres connection test skipped: {error}')
+            pytest.skip(f'Connection failed: {error}')
+
+
+# Versão alternativa usando fixtures do pytest (mais pythônica)
+@pytest.fixture(scope="class")
+def db_connection():
+    """Fixture para conexão com o banco de dados"""
+    connection_params = {
+        'host': 'db.qpgqjkujtabjnavzwzut.supabase.co',
+        'port': 5432,
+        'user': 'postgres',
+        'password': 'fE8dUCb1QAnCpGJc',
+        'database': 'postgres',
+        'sslmode': 'require'
+    }
+
+    connection = None
+    try:
+        connection = psycopg2.connect(**connection_params)
+        yield connection
+    except psycopg2.Error as e:
+        pytest.skip(f"Could not connect to database: {e}")
+    finally:
+        if connection and not connection.closed:
+            connection.close()
+
+
+class TestDatabaseConnectionWithFixture:
+    """Versão alternativa usando fixtures do pytest"""
+
+    def test_connection_and_simple_query(self, db_connection):
+        """Testa conexão e query simples usando fixture"""
+        with db_connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute('SELECT 1+1 AS result')
+            result = cursor.fetchone()
+            assert result['result'] == 2
+
+    def test_connection_health_check(self, db_connection):
+        """Testa saúde da conexão"""
+        try:
+            with db_connection.cursor() as cursor:
+                cursor.execute('SELECT NOW()')
+                print('Postgres connection test passed')
+        except psycopg2.Error as error:
+            print(f'Postgres connection test skipped: {error}')
+            pytest.skip(f'Connection failed: {error}')

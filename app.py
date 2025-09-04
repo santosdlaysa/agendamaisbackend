@@ -2,6 +2,7 @@ from flask import Flask
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from src.config.database import db, init_db
+import src.models
 from src.app.auth.auth import auth_bp
 from src.app.main.client.clients import clients_bp
 from src.app.main.professional.professionals import professionals_bp
@@ -25,7 +26,7 @@ def create_app():
     if os.getenv('FLASK_ENV') == 'production':
         CORS(app)  # Permite todos os origins em produção
     else:
-        CORS(app, origins=['http://localhost:3000', 'http://localhost:5173'])
+        CORS(app, origins=['http://localhost:3000', 'http://localhost:5173', 'http://172.29.16.1:3001'])
     JWTManager(app)
     db.init_app(app)
     

@@ -1,4 +1,4 @@
-from src.models.user import db
+from src.config.database import db
 from datetime import datetime
 
 class Client(db.Model):
@@ -25,3 +25,13 @@ class Client(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
+    
+    def to_dict_with_stats(self):
+        """Converte o objeto para dicionário incluindo estatísticas"""
+        client_dict = self.to_dict()
+        client_dict['stats'] = {
+            'total_appointments': len(self.appointments),
+            'completed_appointments': len([apt for apt in self.appointments if apt.status == 'completed']),
+            'pending_appointments': len([apt for apt in self.appointments if apt.status == 'scheduled'])
+        }
+        return client_dict

@@ -1,4 +1,4 @@
-from src.models.user import db
+from src.config.database import db
 from datetime import datetime
 
 professional_services = db.Table('professional_services',
@@ -37,3 +37,20 @@ class Professional(db.Model):
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'services': [service.to_dict() for service in self.services] if hasattr(self, 'services') else []
         }
+    
+    def to_dict_with_stats(self):
+        """Converte o objeto para dicionário incluindo estatísticas"""
+        professional_dict = self.to_dict()
+        professional_dict['stats'] = {
+            'total_appointments': len(self.appointments),
+            'completed_appointments': len([apt for apt in self.appointments if apt.status == 'completed']),
+            'pending_appointments': len([apt for apt in self.appointments if apt.status == 'scheduled']),
+            'total_services': len(self.services)
+        }
+        return professional_dict
+    
+    def to_dict_with_services(self):
+        """Converte o objeto para dicionário incluindo serviços completos"""
+        professional_dict = self.to_dict()
+        professional_dict['services'] = [service.to_dict() for service in self.services]
+        return professional_dict
