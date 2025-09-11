@@ -14,6 +14,7 @@ class Appointment(db.Model):
     status = db.Column(db.String(50), default='scheduled')
     notes = db.Column(db.Text)
     price = db.Column(db.Numeric(10, 2))
+    payment_method = db.Column(db.String(50))
     notification_sent = db.Column(db.Boolean, default=False)
     reminder_sent = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -32,6 +33,7 @@ class Appointment(db.Model):
             'status': self.status,
             'notes': self.notes,
             'price': float(self.price) if self.price else None,
+            'payment_method': self.payment_method,
             'notification_sent': self.notification_sent,
             'reminder_sent': self.reminder_sent,
             'created_at': self.created_at.isoformat() if self.created_at else None,
@@ -65,6 +67,7 @@ class Appointment(db.Model):
             'status': self.status,
             'notes': self.notes,
             'price': float(self.price) if self.price else None,
+            'payment_method': self.payment_method,
             'notification_sent': self.notification_sent,
             'reminder_sent': self.reminder_sent,
             'created_at': self.created_at.isoformat() if self.created_at else None,
@@ -72,6 +75,30 @@ class Appointment(db.Model):
             'client': self.client.to_dict() if hasattr(self, 'client') and self.client else None,
             'professional': self.professional.to_dict() if hasattr(self, 'professional') and self.professional else None,
             'service': self.service.to_dict() if hasattr(self, 'service') and self.service else None
+        }
+    
+    def calculate_final_price(self):
+        """Calcular preço final baseado no serviço"""
+        if self.service:
+            return float(self.service.price)
+        return 0.0
+    
+    def complete_appointment(self):
+        """Marcar agendamento como concluído e calcular valores"""
+        self.status = 'completed'
+        
+        # Calcular preço automaticamente se não foi definido
+        if not self.price:
+            self.price = self.calculate_final_price()
+        
+        # Atualizar timestamp
+        self.updated_at = datetime.utcnow()
+        
+        return {
+            'status': 'completed',
+            'price_calculated': float(self.price) if self.price else 0.0,
+            'service_name': self.service.name if self.service else None,
+            'completion_time': self.updated_at.isoformat()
         }
     
     @staticmethod
