@@ -4,7 +4,7 @@
   "description": "Sistema de Agendamento MVP - Backend Flask + Frontend React",
   "scripts": {
     "dev": "concurrently \"npm run backend\" \"npm run frontend\"",
-    "backend": "cd backend && python run.py",
+    "backend": "py run.py",
     "frontend": "cd frontend && npm run dev",
     "install:all": "cd backend && pip install -r requirements.txt && cd ../frontend && npm install",
     "build": "cd frontend && npm run build",
@@ -17,5 +17,8 @@
     "concurrently": "^9.2.1",
     "jest": "^30.1.3",
     "supertest": "^7.1.4"
+  },
+  "dependencies": {
+    "postgres": "^3.4.7"
   }
 }

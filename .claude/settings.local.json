@@ -6,7 +6,11 @@
       "Bash(mkdir:*)",
       "Bash(npm install:*)",
       "Bash(nslookup:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(npx concurrently:*)",
+      "Bash(rm:*)",
+      "Bash(dir)",
+      "Bash(py -m pip list:*)"
     ],
     "deny": [],
     "ask": []
