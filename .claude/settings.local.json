@@ -10,7 +10,8 @@
       "Bash(npx concurrently:*)",
       "Bash(rm:*)",
       "Bash(dir)",
-      "Bash(py -m pip list:*)"
+      "Bash(py -m pip list:*)",
+      "Bash(py migrate_payment_method.py)"
     ],
     "deny": [],
     "ask": []
