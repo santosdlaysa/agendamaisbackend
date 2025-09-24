@@ -582,5 +582,323 @@ const createAppointment = async (appointmentData) => {
 
 ---
 
-*Documentação atualizada em: 11/09/2025*  
-*Versão da API: 1.0*
+## 📱 Lembretes Automáticos
+
+### 1. **Listar Lembretes**
+```http
+GET /api/reminders
+```
+**Query Parameters:**
+- `page`, `per_page`: paginação
+- `appointment_id`: ID do agendamento
+- `professional_id`: ID do profissional
+- `client_id`: ID do cliente
+- `reminder_type`: whatsapp ou sms
+- `status`: pending, sent, failed
+- `start_date`: YYYY-MM-DD (filtro data inicial)
+- `end_date`: YYYY-MM-DD (filtro data final)
+
+**Response (200):**
+```json
+{
+  "reminders": [
+    {
+      "id": 1,
+      "appointment_id": 5,
+      "reminder_type": "whatsapp",
+      "reminder_time": "2025-09-10T13:00:00",
+      "message": "🗓️ *Lembrete de Agendamento*\n\nOlá *Maria Santos*!...",
+      "phone_number": "+5511999999999",
+      "status": "sent",
+      "sent_at": "2025-09-10T13:00:15",
+      "error_message": null,
+      "attempts": 1,
+      "created_at": "2025-09-09T14:00:00",
+      "updated_at": "2025-09-10T13:00:15",
+      "appointment": {
+        /* dados completos do agendamento */
+      }
+    }
+  ],
+  "pagination": { /* dados de paginação */ }
+}
+```
+
+### 2. **Obter Lembrete Específico**
+```http
+GET /api/reminders/{reminder_id}
+```
+
+### 3. **Criar Lembretes para Agendamento**
+```http
+POST /api/reminders/appointment/{appointment_id}
+```
+**Response (201):**
+```json
+{
+  "message": "Lembretes criados com sucesso",
+  "success": true,
+  "appointment_id": 5,
+  "reminders_created": [
+    {
+      "type": "whatsapp",
+      "scheduled_for": "2025-09-10T13:00:00",
+      "hours_before": 24
+    }
+  ],
+  "total_reminders": 1
+}
+```
+
+### 4. **Enviar Lembrete Imediatamente**
+```http
+POST /api/reminders/{reminder_id}/send
+```
+**Response (200):**
+```json
+{
+  "message": "Lembrete enviado com sucesso",
+  "success": true,
+  "reminder_id": 1,
+  "message_sid": "SMxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "sent_at": "2025-09-10T14:30:00"
+}
+```
+
+### 5. **Excluir Lembrete**
+```http
+DELETE /api/reminders/{reminder_id}
+```
+
+### 6. **Obter Configurações de Lembrete**
+```http
+GET /api/reminders/settings?professional_id={id}
+```
+**Response (200):**
+```json
+{
+  "professional_id": 1,
+  "professional_name": "João Silva",
+  "settings": [
+    {
+      "id": 1,
+      "professional_id": 1,
+      "reminder_type": "whatsapp",
+      "enabled": true,
+      "hours_before": 24,
+      "custom_message": null,
+      "created_at": "2025-09-10T10:00:00",
+      "updated_at": "2025-09-10T10:00:00"
+    },
+    {
+      "id": 2,
+      "professional_id": 1,
+      "reminder_type": "sms",
+      "enabled": false,
+      "hours_before": 24,
+      "custom_message": null,
+      "created_at": "2025-09-10T10:00:00",
+      "updated_at": "2025-09-10T10:00:00"
+    }
+  ]
+}
+```
+
+### 7. **Atualizar Configurações de Lembrete**
+```http
+PUT /api/reminders/settings
+```
+**Body:**
+```json
+{
+  "professional_id": 1,
+  "settings": [
+    {
+      "reminder_type": "whatsapp",
+      "enabled": true,
+      "hours_before": 24,
+      "custom_message": "Olá {client_name}! Lembrete do seu agendamento amanhã às {time} com {professional_name}."
+    },
+    {
+      "reminder_type": "sms",
+      "enabled": false,
+      "hours_before": 2
+    }
+  ]
+}
+```
+
+### 8. **Lembretes Próximos**
+```http
+GET /api/reminders/upcoming?hours=24
+```
+**Response (200):**
+```json
+{
+  "success": true,
+  "count": 3,
+  "reminders": [
+    {
+      "id": 5,
+      "reminder_time": "2025-09-11T09:00:00",
+      "reminder_type": "whatsapp",
+      "status": "pending",
+      "appointment": { /* dados do agendamento */ }
+    }
+  ]
+}
+```
+
+### 9. **Processar Lembretes Pendentes**
+```http
+POST /api/reminders/process
+```
+**Response (200):**
+```json
+{
+  "message": "Lembretes processados com sucesso",
+  "success": true,
+  "processed_count": 2,
+  "results": [
+    {
+      "reminder_id": 5,
+      "appointment_id": 10,
+      "type": "whatsapp",
+      "result": {
+        "success": true,
+        "reminder_id": 5,
+        "message_sid": "SMxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "sent_at": "2025-09-11T09:00:15"
+      }
+    }
+  ]
+}
+```
+
+### 10. **Agendador Automático**
+
+#### Iniciar Agendador:
+```http
+POST /api/reminders/scheduler/start
+```
+
+#### Parar Agendador:
+```http
+POST /api/reminders/scheduler/stop
+```
+
+#### Status do Agendador:
+```http
+GET /api/reminders/scheduler/status
+```
+**Response (200):**
+```json
+{
+  "scheduler": {
+    "running": true,
+    "check_interval": 300,
+    "thread_alive": true
+  }
+}
+```
+
+### 11. **Testes de Conexão**
+
+#### Testar WhatsApp:
+```http
+POST /api/reminders/test/whatsapp
+```
+
+#### Testar SMS:
+```http
+POST /api/reminders/test/sms
+```
+
+### 12. **Estatísticas dos Lembretes**
+```http
+GET /api/reminders/stats
+```
+**Query Parameters:**
+- `start_date`: YYYY-MM-DD (opcional)
+- `end_date`: YYYY-MM-DD (opcional)
+- `professional_id`: ID do profissional (opcional)
+
+**Response (200):**
+```json
+{
+  "stats": {
+    "total_reminders": 50,
+    "sent_reminders": 45,
+    "pending_reminders": 3,
+    "failed_reminders": 2,
+    "success_rate": 90.0,
+    "by_type": {
+      "whatsapp": 35,
+      "sms": 15
+    },
+    "period": {
+      "start_date": "2025-09-01",
+      "end_date": "2025-09-30"
+    }
+  }
+}
+```
+
+---
+
+## 🔧 Configuração dos Lembretes
+
+### Variáveis de Ambiente Obrigatórias:
+```env
+# Configurações Twilio para WhatsApp e SMS
+TWILIO_ACCOUNT_SID=your-twilio-account-sid
+TWILIO_AUTH_TOKEN=your-twilio-auth-token
+TWILIO_WHATSAPP_FROM=+14155238886
+TWILIO_SMS_FROM=+1234567890
+
+# Números para teste (opcional)
+TEST_WHATSAPP_NUMBER=+5511999999999
+TEST_SMS_NUMBER=+5511999999999
+
+# Configurações do agendador de lembretes
+REMINDER_CHECK_INTERVAL=300
+```
+
+### Framework e Stack:
+- **Backend:** Flask 2.3.3 (Python)
+- **ORM:** SQLAlchemy via Flask-SQLAlchemy 3.0.5
+- **Banco de Dados:** PostgreSQL ou SQLite
+- **Notificações:** Twilio API (WhatsApp & SMS)
+- **Autenticação:** JWT via Flask-JWT-Extended
+
+### Funcionalidades dos Lembretes:
+- ✅ **Criação automática** ao fazer agendamento
+- ✅ **Configurações por profissional** (WhatsApp/SMS)
+- ✅ **Agendamento automático** com processamento em background
+- ✅ **Retry automático** para falhas (máx 3 tentativas)
+- ✅ **Mensagens personalizáveis** com templates
+- ✅ **Monitoramento e estatísticas** completas
+- ✅ **Testes de conexão** para WhatsApp e SMS
+
+### Novos Campos no Agendamento:
+Quando um agendamento é criado, a resposta agora inclui:
+```json
+{
+  "message": "Agendamento criado com sucesso",
+  "appointment": { /* dados do agendamento */ },
+  "reminders_created": [
+    {
+      "type": "whatsapp",
+      "scheduled_for": "2025-09-10T13:00:00",
+      "hours_before": 24
+    }
+  ],
+  "total_reminders": 1
+}
+```
+
+---
+
+*Documentação atualizada em: 23/09/2025*  
+*Versão da API: 1.1*  
+*Framework: Flask 2.3.3 + SQLAlchemy*

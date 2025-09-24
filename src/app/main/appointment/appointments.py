@@ -6,6 +6,7 @@ from src.models.client import Client
 from src.models.professional import Professional
 from src.models.service import Service
 from datetime import datetime, date, time, timedelta
+from src.services.reminder_scheduler import reminder_scheduler
 
 appointments_bp = Blueprint('appointments', __name__)
 
@@ -163,10 +164,22 @@ def create_appointment():
         db.session.add(appointment)
         db.session.commit()
         
-        return jsonify(
-            message='Agendamento criado com sucesso',
-            appointment=appointment.to_dict_detailed()
-        ), 201
+        # Criar lembretes automáticos para o agendamento
+        reminder_result = reminder_scheduler.create_reminders_for_appointment(appointment.id)
+        
+        response_data = {
+            'message': 'Agendamento criado com sucesso',
+            'appointment': appointment.to_dict_detailed()
+        }
+        
+        # Incluir informações dos lembretes criados
+        if reminder_result['success']:
+            response_data['reminders_created'] = reminder_result['reminders_created']
+            response_data['total_reminders'] = reminder_result['total_reminders']
+        else:
+            response_data['reminder_warning'] = f"Agendamento criado, mas houve problema ao criar lembretes: {reminder_result['error']}"
+        
+        return jsonify(**response_data), 201
         
     except Exception as e:
         db.session.rollback()
