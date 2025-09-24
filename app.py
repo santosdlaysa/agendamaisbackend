@@ -8,7 +8,14 @@ from src.app.main.client.clients import clients_bp
 from src.app.main.professional.professionals import professionals_bp
 from src.app.main.service.services import services_bp
 from src.app.main.appointment.appointments import appointments_bp
-from src.app.main.reminder.reminders import reminders_bp
+# Import reminder blueprint conditionally
+try:
+    from src.app.main.reminder.reminders import reminders_bp
+    REMINDERS_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: Reminder functionality not available: {e}")
+    reminders_bp = None
+    REMINDERS_AVAILABLE = False
 import os
 from dotenv import load_dotenv
 
@@ -51,7 +58,10 @@ def create_app():
     app.register_blueprint(professionals_bp, url_prefix='/api/professionals')
     app.register_blueprint(services_bp, url_prefix='/api/services')
     app.register_blueprint(appointments_bp, url_prefix='/api/appointments')
-    app.register_blueprint(reminders_bp, url_prefix='/api/reminders')
+    
+    # Register reminder blueprint if available
+    if REMINDERS_AVAILABLE and reminders_bp:
+        app.register_blueprint(reminders_bp, url_prefix='/api/reminders')
     
     # Criar tabelas
     with app.app_context():
