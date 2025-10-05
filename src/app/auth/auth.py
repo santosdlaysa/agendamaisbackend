@@ -44,14 +44,23 @@ def login():
     """Login do usuário"""
     try:
         data = request.get_json()
-        
+
         # Validar dados obrigatórios
         if not data.get('email') or not data.get('password'):
             return jsonify(message='Email e senha são obrigatórios'), 400
-        
+
         # Buscar usuário
         user = User.query.filter_by(email=data['email']).first()
-        
+
+        # DEBUG
+        print(f"DEBUG - Email recebido: '{data['email']}'")
+        print(f"DEBUG - Usuário encontrado: {user is not None}")
+        if user:
+            print(f"DEBUG - Email no banco: '{user.email}'")
+            print(f"DEBUG - Password hash: {user.password_hash}")
+            senha_valida = user.check_password(data['password'])
+            print(f"DEBUG - Senha válida: {senha_valida}")
+
         # Verificar usuário e senha
         if not user or not user.check_password(data['password']):
             return jsonify(message='Email ou senha inválidos'), 401

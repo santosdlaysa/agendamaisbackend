@@ -280,17 +280,39 @@ def delete_appointment(appointment_id):
     """Excluir agendamento"""
     try:
         appointment = Appointment.query.get(appointment_id)
-        
+
         if not appointment:
             return jsonify(message='Agendamento não encontrado'), 404
-        
+
+        # DEBUG
+        print(f"DEBUG - Excluindo agendamento ID: {appointment_id}")
+
+        # Excluir lembretes relacionados primeiro (se existirem)
+        try:
+            from src.models.reminder import Reminder
+            reminders = Reminder.query.filter_by(appointment_id=appointment_id).all()
+            print(f"DEBUG - Lembretes encontrados: {len(reminders)}")
+
+            for reminder in reminders:
+                print(f"DEBUG - Excluindo lembrete ID: {reminder.id}")
+                db.session.delete(reminder)
+        except ImportError:
+            # Se modelo Reminder não existir, apenas continua
+            print("DEBUG - Modelo Reminder não disponível")
+            pass
+
+        # Agora excluir o agendamento
         db.session.delete(appointment)
         db.session.commit()
-        
+
+        print(f"DEBUG - Agendamento {appointment_id} excluído com sucesso")
         return jsonify(message='Agendamento excluído com sucesso'), 200
-        
+
     except Exception as e:
         db.session.rollback()
+        print(f"DEBUG - Erro ao excluir: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify(message=f'Erro ao excluir agendamento: {str(e)}'), 500
 
 @appointments_bp.route('/<int:appointment_id>/status', methods=['PUT'])
