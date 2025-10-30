@@ -3,6 +3,7 @@ from .client import Client
 from .professional import Professional
 from .service import Service
 from .appointment import Appointment
+from .subscription import Subscription
 
 # Import reminder models after appointment to avoid circular dependency
 try:
