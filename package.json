@@ -3,13 +3,12 @@
   "version": "1.0.0",
   "description": "Sistema de Agendamento MVP - Backend Flask + Frontend React",
   "scripts": {
-    "dev": "concurrently \"npm run backend\" \"npm run frontend\"",
-    "backend": "py run.py",
-    "frontend": "cd frontend && npm run dev",
-    "install:all": "cd backend && pip install -r requirements.txt && cd ../frontend && npm install",
-    "build": "cd frontend && npm run build",
+    "start": "python run.py",
+    "dev": "python run.py",
+    "install": "pip install -r requirements.txt",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "migrate": "python migrate_payment_method.py"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
@@ -19,6 +18,7 @@
     "supertest": "^7.1.4"
   },
   "dependencies": {
-    "postgres": "^3.4.7"
+    "postgres": "^3.4.7",
+    "twilio": "^5.10.4"
   }
 }
