@@ -38,7 +38,7 @@ def create_app():
         'http://172.29.16.1:3001',
         'https://agendamais-x19j-32f6fx9yd-santosdlaysas-projects.vercel.app',
         'https://agendamais-x19j.vercel.app',
-        'https://agendamais.site/'
+        'https://agendamais.site/',
         os.getenv('FRONTEND_URL')
     ]
 
