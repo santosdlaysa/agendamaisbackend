@@ -5,7 +5,7 @@ class Subscription(db.Model):
     __tablename__ = 'subscriptions'
 
     id = db.Column(db.Integer, primary_key=True)
-    client_id = db.Column(db.Integer, db.ForeignKey('clients.id', ondelete='CASCADE'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
     plan = db.Column(db.String(50), nullable=False)  # basic, pro, enterprise
     stripe_customer_id = db.Column(db.String(100))
     stripe_subscription_id = db.Column(db.String(100), unique=True)
@@ -17,14 +17,14 @@ class Subscription(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Relacionamento com Client
-    client = db.relationship('Client', backref=db.backref('subscription', uselist=False))
+    # Relacionamento com User
+    user = db.relationship('User', backref=db.backref('subscription', uselist=False))
 
     def to_dict(self):
         """Converte o objeto para dicionário"""
         return {
             'id': self.id,
-            'client_id': self.client_id,
+            'user_id': self.user_id,
             'plan': self.plan,
             'stripe_customer_id': self.stripe_customer_id,
             'stripe_subscription_id': self.stripe_subscription_id,

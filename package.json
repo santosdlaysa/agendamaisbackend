@@ -3,12 +3,12 @@
   "version": "1.0.0",
   "description": "Sistema de Agendamento MVP - Backend Flask + Frontend React",
   "scripts": {
-    "start": "python run.py",
-    "dev": "python run.py",
-    "install": "pip install -r requirements.txt",
+    "start": "py run.py",
+    "dev": "py run.py",
+    "install": "py -m pip install -r requirements.txt",
     "test": "jest",
     "test:watch": "jest --watch",
-    "migrate": "python migrate_payment_method.py"
+    "migrate": "py migrate_payment_method.py"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",

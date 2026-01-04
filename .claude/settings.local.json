@@ -11,7 +11,14 @@
       "Bash(rm:*)",
       "Bash(dir)",
       "Bash(py -m pip list:*)",
-      "Bash(py migrate_payment_method.py)"
+      "Bash(py migrate_payment_method.py)",
+      "Bash(py -m pip install:*)",
+      "Bash(where py)",
+      "Bash(where:*)",
+      "Bash(py run.py:*)",
+      "Bash(py:*)",
+      "Bash(dir \"C:\\\\Users\\\\santo\\\\WebstormProjects\\\\agendamaisbackend\\\\src\\\\app\\\\main\")",
+      "Bash(findstr:*)"
     ],
     "deny": [],
     "ask": []

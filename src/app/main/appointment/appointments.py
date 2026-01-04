@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required
+from flasgger import swag_from
 from src.models.user import db
 from src.models.appointment import Appointment
 from src.models.client import Client
@@ -18,6 +19,33 @@ appointments_bp = Blueprint('appointments', __name__)
 
 @appointments_bp.route('', methods=['GET'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Agendamentos'],
+    'summary': 'Listar agendamentos',
+    'description': 'Retorna uma lista paginada de agendamentos com filtros',
+    'parameters': [
+        {'name': 'start_date', 'in': 'query', 'type': 'string', 'format': 'date', 'description': 'Data inicial (YYYY-MM-DD)'},
+        {'name': 'end_date', 'in': 'query', 'type': 'string', 'format': 'date', 'description': 'Data final (YYYY-MM-DD)'},
+        {'name': 'professional_id', 'in': 'query', 'type': 'integer'},
+        {'name': 'client_id', 'in': 'query', 'type': 'integer'},
+        {'name': 'service_id', 'in': 'query', 'type': 'integer'},
+        {'name': 'status', 'in': 'query', 'type': 'string', 'enum': ['scheduled', 'confirmed', 'completed', 'cancelled', 'no_show']},
+        {'name': 'page', 'in': 'query', 'type': 'integer', 'default': 1},
+        {'name': 'per_page', 'in': 'query', 'type': 'integer', 'default': 50}
+    ],
+    'responses': {
+        200: {
+            'description': 'Lista de agendamentos',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'appointments': {'type': 'array', 'items': {'$ref': '#/definitions/Appointment'}},
+                    'pagination': {'$ref': '#/definitions/Pagination'}
+                }
+            }
+        }
+    }
+})
 def get_appointments():
     """Listar agendamentos com filtros"""
     try:
@@ -89,6 +117,17 @@ def get_appointments():
 
 @appointments_bp.route('/<int:appointment_id>', methods=['GET'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Agendamentos'],
+    'summary': 'Obter agendamento específico',
+    'parameters': [
+        {'name': 'appointment_id', 'in': 'path', 'type': 'integer', 'required': True}
+    ],
+    'responses': {
+        200: {'description': 'Dados do agendamento'},
+        404: {'description': 'Agendamento não encontrado'}
+    }
+})
 def get_appointment(appointment_id):
     """Obter agendamento específico"""
     try:
@@ -104,6 +143,37 @@ def get_appointment(appointment_id):
 
 @appointments_bp.route('', methods=['POST'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Agendamentos'],
+    'summary': 'Criar novo agendamento',
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['client_id', 'professional_id', 'service_id', 'appointment_date', 'start_time'],
+                'properties': {
+                    'client_id': {'type': 'integer', 'example': 1},
+                    'professional_id': {'type': 'integer', 'example': 1},
+                    'service_id': {'type': 'integer', 'example': 1},
+                    'appointment_date': {'type': 'string', 'format': 'date', 'example': '2024-01-15'},
+                    'start_time': {'type': 'string', 'example': '09:00'},
+                    'status': {'type': 'string', 'enum': ['scheduled', 'confirmed'], 'default': 'scheduled'},
+                    'notes': {'type': 'string'},
+                    'price': {'type': 'number'},
+                    'payment_method': {'type': 'string'}
+                }
+            }
+        }
+    ],
+    'responses': {
+        201: {'description': 'Agendamento criado com sucesso'},
+        400: {'description': 'Dados inválidos ou conflito de horário'},
+        404: {'description': 'Cliente, profissional ou serviço não encontrado'}
+    }
+})
 def create_appointment():
     """Criar novo agendamento"""
     try:
@@ -197,6 +267,38 @@ def create_appointment():
 
 @appointments_bp.route('/<int:appointment_id>', methods=['PUT'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Agendamentos'],
+    'summary': 'Atualizar agendamento (reagendar)',
+    'parameters': [
+        {'name': 'appointment_id', 'in': 'path', 'type': 'integer', 'required': True},
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['client_id', 'professional_id', 'service_id', 'appointment_date', 'start_time'],
+                'properties': {
+                    'client_id': {'type': 'integer'},
+                    'professional_id': {'type': 'integer'},
+                    'service_id': {'type': 'integer'},
+                    'appointment_date': {'type': 'string', 'format': 'date'},
+                    'start_time': {'type': 'string'},
+                    'status': {'type': 'string'},
+                    'notes': {'type': 'string'},
+                    'price': {'type': 'number'},
+                    'payment_method': {'type': 'string'}
+                }
+            }
+        }
+    ],
+    'responses': {
+        200: {'description': 'Agendamento atualizado com sucesso'},
+        400: {'description': 'Conflito de horário ou dados inválidos'},
+        404: {'description': 'Agendamento não encontrado'}
+    }
+})
 def update_appointment(appointment_id):
     """Atualizar agendamento (reagendar)"""
     try:
@@ -276,6 +378,17 @@ def update_appointment(appointment_id):
 
 @appointments_bp.route('/<int:appointment_id>', methods=['DELETE'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Agendamentos'],
+    'summary': 'Excluir agendamento',
+    'parameters': [
+        {'name': 'appointment_id', 'in': 'path', 'type': 'integer', 'required': True}
+    ],
+    'responses': {
+        200: {'description': 'Agendamento excluído com sucesso'},
+        404: {'description': 'Agendamento não encontrado'}
+    }
+})
 def delete_appointment(appointment_id):
     """Excluir agendamento"""
     try:
@@ -317,6 +430,33 @@ def delete_appointment(appointment_id):
 
 @appointments_bp.route('/<int:appointment_id>/status', methods=['PUT'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Agendamentos'],
+    'summary': 'Atualizar status do agendamento',
+    'parameters': [
+        {'name': 'appointment_id', 'in': 'path', 'type': 'integer', 'required': True},
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['status'],
+                'properties': {
+                    'status': {'type': 'string', 'enum': ['scheduled', 'confirmed', 'completed', 'cancelled', 'no_show']},
+                    'notes': {'type': 'string'},
+                    'price': {'type': 'number'},
+                    'payment_method': {'type': 'string'}
+                }
+            }
+        }
+    ],
+    'responses': {
+        200: {'description': 'Status atualizado com sucesso'},
+        400: {'description': 'Status inválido'},
+        404: {'description': 'Agendamento não encontrado'}
+    }
+})
 def update_appointment_status(appointment_id):
     """Atualizar status do agendamento"""
     try:
@@ -373,6 +513,31 @@ def update_appointment_status(appointment_id):
 
 @appointments_bp.route('/<int:appointment_id>/complete', methods=['PUT'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Agendamentos'],
+    'summary': 'Concluir agendamento',
+    'description': 'Marca o agendamento como concluído com cálculo automático de valores',
+    'parameters': [
+        {'name': 'appointment_id', 'in': 'path', 'type': 'integer', 'required': True},
+        {
+            'name': 'body',
+            'in': 'body',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'notes': {'type': 'string'},
+                    'custom_price': {'type': 'number', 'description': 'Preço customizado (override)'},
+                    'payment_method': {'type': 'string', 'example': 'pix'}
+                }
+            }
+        }
+    ],
+    'responses': {
+        200: {'description': 'Agendamento concluído com sucesso'},
+        400: {'description': 'Agendamento já concluído ou cancelado'},
+        404: {'description': 'Agendamento não encontrado'}
+    }
+})
 def complete_appointment(appointment_id):
     """Marcar agendamento como concluído com cálculo automático de valores"""
     try:
@@ -438,6 +603,20 @@ def complete_appointment(appointment_id):
 
 @appointments_bp.route('/calendar', methods=['GET'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Agendamentos'],
+    'summary': 'Obter agendamentos para calendário',
+    'description': 'Retorna agendamentos formatados para visualização em calendário',
+    'parameters': [
+        {'name': 'start_date', 'in': 'query', 'type': 'string', 'format': 'date', 'required': True},
+        {'name': 'end_date', 'in': 'query', 'type': 'string', 'format': 'date', 'required': True},
+        {'name': 'professional_id', 'in': 'query', 'type': 'integer'}
+    ],
+    'responses': {
+        200: {'description': 'Eventos do calendário'},
+        400: {'description': 'Datas obrigatórias não fornecidas'}
+    }
+})
 def get_calendar_appointments():
     """Obter agendamentos para visualização em calendário"""
     try:
@@ -496,6 +675,40 @@ def get_calendar_appointments():
 
 @appointments_bp.route('/check-availability', methods=['POST'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Agendamentos'],
+    'summary': 'Verificar disponibilidade de horário',
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['professional_id', 'service_id', 'appointment_date', 'start_time'],
+                'properties': {
+                    'professional_id': {'type': 'integer'},
+                    'service_id': {'type': 'integer'},
+                    'appointment_date': {'type': 'string', 'format': 'date'},
+                    'start_time': {'type': 'string', 'example': '09:00'},
+                    'exclude_appointment_id': {'type': 'integer', 'description': 'ID do agendamento a excluir (para reagendamento)'}
+                }
+            }
+        }
+    ],
+    'responses': {
+        200: {
+            'description': 'Disponibilidade verificada',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'available': {'type': 'boolean'},
+                    'end_time': {'type': 'string'}
+                }
+            }
+        }
+    }
+})
 def check_availability():
     """Verificar disponibilidade de horário"""
     try:
@@ -549,6 +762,38 @@ def check_availability():
 
 @appointments_bp.route('/financial-report', methods=['GET'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Agendamentos'],
+    'summary': 'Relatório financeiro',
+    'description': 'Retorna relatório financeiro dos agendamentos concluídos',
+    'parameters': [
+        {'name': 'start_date', 'in': 'query', 'type': 'string', 'format': 'date'},
+        {'name': 'end_date', 'in': 'query', 'type': 'string', 'format': 'date'},
+        {'name': 'professional_id', 'in': 'query', 'type': 'integer'},
+        {'name': 'service_id', 'in': 'query', 'type': 'integer'}
+    ],
+    'responses': {
+        200: {
+            'description': 'Relatório financeiro',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'financial_summary': {
+                        'type': 'object',
+                        'properties': {
+                            'total_revenue': {'type': 'number'},
+                            'total_appointments': {'type': 'integer'},
+                            'average_ticket': {'type': 'number'}
+                        }
+                    },
+                    'service_breakdown': {'type': 'object'},
+                    'professional_breakdown': {'type': 'object'},
+                    'payment_breakdown': {'type': 'object'}
+                }
+            }
+        }
+    }
+})
 def get_financial_report():
     """Obter relatório financeiro dos agendamentos concluídos"""
     try:

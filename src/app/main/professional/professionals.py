@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required
+from flasgger import swag_from
 from src.models.user import db
 from src.models.professional import Professional
 from src.models.service import Service
@@ -8,6 +9,28 @@ professionals_bp = Blueprint('professionals', __name__)
 
 @professionals_bp.route('', methods=['GET'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Profissionais'],
+    'summary': 'Listar todos os profissionais',
+    'description': 'Retorna uma lista de profissionais com filtros opcionais',
+    'parameters': [
+        {'name': 'search', 'in': 'query', 'type': 'string', 'description': 'Buscar por nome ou função'},
+        {'name': 'active_only', 'in': 'query', 'type': 'boolean', 'default': False, 'description': 'Filtrar apenas ativos'},
+        {'name': 'include_services', 'in': 'query', 'type': 'boolean', 'default': False, 'description': 'Incluir serviços'},
+        {'name': 'include_stats', 'in': 'query', 'type': 'boolean', 'default': False, 'description': 'Incluir estatísticas'}
+    ],
+    'responses': {
+        200: {
+            'description': 'Lista de profissionais',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'professionals': {'type': 'array', 'items': {'$ref': '#/definitions/Professional'}}
+                }
+            }
+        }
+    }
+})
 def get_professionals():
     """Listar todos os profissionais"""
     try:
@@ -51,6 +74,19 @@ def get_professionals():
 
 @professionals_bp.route('/<int:professional_id>', methods=['GET'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Profissionais'],
+    'summary': 'Obter profissional específico',
+    'parameters': [
+        {'name': 'professional_id', 'in': 'path', 'type': 'integer', 'required': True},
+        {'name': 'include_services', 'in': 'query', 'type': 'boolean', 'default': True},
+        {'name': 'include_stats', 'in': 'query', 'type': 'boolean', 'default': False}
+    ],
+    'responses': {
+        200: {'description': 'Dados do profissional'},
+        404: {'description': 'Profissional não encontrado'}
+    }
+})
 def get_professional(professional_id):
     """Obter profissional específico"""
     try:
@@ -74,6 +110,34 @@ def get_professional(professional_id):
 
 @professionals_bp.route('', methods=['POST'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Profissionais'],
+    'summary': 'Criar novo profissional',
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['name', 'role'],
+                'properties': {
+                    'name': {'type': 'string', 'example': 'Dr. Carlos Silva'},
+                    'role': {'type': 'string', 'example': 'Fisioterapeuta'},
+                    'phone': {'type': 'string', 'example': '(11) 99999-9999'},
+                    'email': {'type': 'string', 'example': 'carlos@clinica.com'},
+                    'color': {'type': 'string', 'example': '#3B82F6'},
+                    'active': {'type': 'boolean', 'default': True},
+                    'service_ids': {'type': 'array', 'items': {'type': 'integer'}, 'example': [1, 2, 3]}
+                }
+            }
+        }
+    ],
+    'responses': {
+        201: {'description': 'Profissional criado com sucesso'},
+        400: {'description': 'Nome e função são obrigatórios'}
+    }
+})
 def create_professional():
     """Criar novo profissional"""
     try:
@@ -115,6 +179,36 @@ def create_professional():
 
 @professionals_bp.route('/<int:professional_id>', methods=['PUT'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Profissionais'],
+    'summary': 'Atualizar profissional',
+    'parameters': [
+        {'name': 'professional_id', 'in': 'path', 'type': 'integer', 'required': True},
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['name', 'role'],
+                'properties': {
+                    'name': {'type': 'string'},
+                    'role': {'type': 'string'},
+                    'phone': {'type': 'string'},
+                    'email': {'type': 'string'},
+                    'color': {'type': 'string'},
+                    'active': {'type': 'boolean'},
+                    'service_ids': {'type': 'array', 'items': {'type': 'integer'}}
+                }
+            }
+        }
+    ],
+    'responses': {
+        200: {'description': 'Profissional atualizado com sucesso'},
+        400: {'description': 'Nome e função são obrigatórios'},
+        404: {'description': 'Profissional não encontrado'}
+    }
+})
 def update_professional(professional_id):
     """Atualizar profissional"""
     try:
@@ -156,6 +250,19 @@ def update_professional(professional_id):
 
 @professionals_bp.route('/<int:professional_id>', methods=['DELETE'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Profissionais'],
+    'summary': 'Excluir profissional',
+    'description': 'Remove um profissional. Não é possível excluir com agendamentos futuros.',
+    'parameters': [
+        {'name': 'professional_id', 'in': 'path', 'type': 'integer', 'required': True}
+    ],
+    'responses': {
+        200: {'description': 'Profissional excluído com sucesso'},
+        400: {'description': 'Profissional possui agendamentos futuros'},
+        404: {'description': 'Profissional não encontrado'}
+    }
+})
 def delete_professional(professional_id):
     """Excluir profissional"""
     try:
@@ -185,6 +292,17 @@ def delete_professional(professional_id):
 
 @professionals_bp.route('/<int:professional_id>/services', methods=['GET'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Profissionais'],
+    'summary': 'Obter serviços de um profissional',
+    'parameters': [
+        {'name': 'professional_id', 'in': 'path', 'type': 'integer', 'required': True}
+    ],
+    'responses': {
+        200: {'description': 'Lista de serviços do profissional'},
+        404: {'description': 'Profissional não encontrado'}
+    }
+})
 def get_professional_services(professional_id):
     """Obter serviços de um profissional"""
     try:
@@ -202,6 +320,28 @@ def get_professional_services(professional_id):
 
 @professionals_bp.route('/<int:professional_id>/services', methods=['POST'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Profissionais'],
+    'summary': 'Atualizar serviços de um profissional',
+    'parameters': [
+        {'name': 'professional_id', 'in': 'path', 'type': 'integer', 'required': True},
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'service_ids': {'type': 'array', 'items': {'type': 'integer'}, 'example': [1, 2, 3]}
+                }
+            }
+        }
+    ],
+    'responses': {
+        200: {'description': 'Serviços atualizados com sucesso'},
+        404: {'description': 'Profissional não encontrado'}
+    }
+})
 def update_professional_services(professional_id):
     """Atualizar serviços de um profissional"""
     try:
@@ -231,6 +371,18 @@ def update_professional_services(professional_id):
 
 @professionals_bp.route('/<int:professional_id>/toggle-status', methods=['POST'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Profissionais'],
+    'summary': 'Ativar/desativar profissional',
+    'description': 'Alterna o status ativo/inativo do profissional',
+    'parameters': [
+        {'name': 'professional_id', 'in': 'path', 'type': 'integer', 'required': True}
+    ],
+    'responses': {
+        200: {'description': 'Status alterado com sucesso'},
+        404: {'description': 'Profissional não encontrado'}
+    }
+})
 def toggle_professional_status(professional_id):
     """Ativar/desativar profissional"""
     try:

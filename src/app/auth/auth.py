@@ -1,10 +1,46 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
+from flasgger import swag_from
 from src.models.user import db, User
 
 auth_bp = Blueprint('auth', __name__)
 
 @auth_bp.route('/register', methods=['POST'])
+@swag_from({
+    'tags': ['Autenticação'],
+    'summary': 'Registrar novo usuário',
+    'description': 'Cria um novo usuário no sistema',
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['email', 'password', 'name'],
+                'properties': {
+                    'email': {'type': 'string', 'example': 'usuario@email.com'},
+                    'password': {'type': 'string', 'example': 'senha123'},
+                    'name': {'type': 'string', 'example': 'João Silva'},
+                    'role': {'type': 'string', 'example': 'admin', 'default': 'admin'}
+                }
+            }
+        }
+    ],
+    'responses': {
+        201: {
+            'description': 'Usuário criado com sucesso',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'message': {'type': 'string'},
+                    'user': {'$ref': '#/definitions/User'}
+                }
+            }
+        },
+        400: {'description': 'Dados inválidos ou email já em uso'}
+    }
+})
 def register():
     """Registrar novo usuário"""
     try:
@@ -40,6 +76,41 @@ def register():
         return jsonify(message=f'Erro ao criar usuário: {str(e)}'), 500
 
 @auth_bp.route('/login', methods=['POST'])
+@swag_from({
+    'tags': ['Autenticação'],
+    'summary': 'Login do usuário',
+    'description': 'Autentica o usuário e retorna um token JWT',
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['email', 'password'],
+                'properties': {
+                    'email': {'type': 'string', 'example': 'usuario@email.com'},
+                    'password': {'type': 'string', 'example': 'senha123'}
+                }
+            }
+        }
+    ],
+    'responses': {
+        200: {
+            'description': 'Login realizado com sucesso',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'message': {'type': 'string'},
+                    'access_token': {'type': 'string'},
+                    'user': {'$ref': '#/definitions/User'}
+                }
+            }
+        },
+        400: {'description': 'Email e senha são obrigatórios'},
+        401: {'description': 'Email ou senha inválidos'}
+    }
+})
 def login():
     """Login do usuário"""
     try:
@@ -65,8 +136,8 @@ def login():
         if not user or not user.check_password(data['password']):
             return jsonify(message='Email ou senha inválidos'), 401
         
-        # Criar token de acesso
-        access_token = create_access_token(identity=user.id)
+        # Criar token de acesso (identity deve ser string)
+        access_token = create_access_token(identity=str(user.id))
         
         return jsonify(
             message='Login realizado com sucesso',
@@ -79,6 +150,25 @@ def login():
 
 @auth_bp.route('/me', methods=['GET'])
 @jwt_required()
+@swag_from({
+    'tags': ['Autenticação'],
+    'summary': 'Obter dados do usuário atual',
+    'description': 'Retorna os dados do usuário autenticado',
+    'security': [{'Bearer': []}],
+    'responses': {
+        200: {
+            'description': 'Dados do usuário',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'user': {'$ref': '#/definitions/User'}
+                }
+            }
+        },
+        401: {'description': 'Token não fornecido ou inválido'},
+        404: {'description': 'Usuário não encontrado'}
+    }
+})
 def get_current_user():
     """Obter dados do usuário atual"""
     try:
@@ -95,6 +185,33 @@ def get_current_user():
 
 @auth_bp.route('/change-password', methods=['POST'])
 @jwt_required()
+@swag_from({
+    'tags': ['Autenticação'],
+    'summary': 'Alterar senha do usuário',
+    'description': 'Altera a senha do usuário autenticado',
+    'security': [{'Bearer': []}],
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['current_password', 'new_password'],
+                'properties': {
+                    'current_password': {'type': 'string', 'example': 'senhaAtual123'},
+                    'new_password': {'type': 'string', 'example': 'novaSenha456'}
+                }
+            }
+        }
+    ],
+    'responses': {
+        200: {'description': 'Senha alterada com sucesso'},
+        400: {'description': 'Dados inválidos ou senha atual incorreta'},
+        401: {'description': 'Token não fornecido ou inválido'},
+        404: {'description': 'Usuário não encontrado'}
+    }
+})
 def change_password():
     """Alterar senha do usuário"""
     try:

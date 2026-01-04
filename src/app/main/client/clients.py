@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required
+from flasgger import swag_from
 from src.models.user import db
 from src.models.client import Client
 
@@ -7,6 +8,29 @@ clients_bp = Blueprint('clients', __name__)
 
 @clients_bp.route('', methods=['GET'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Clientes'],
+    'summary': 'Listar todos os clientes',
+    'description': 'Retorna uma lista paginada de clientes com opção de busca',
+    'parameters': [
+        {'name': 'search', 'in': 'query', 'type': 'string', 'description': 'Termo de busca (nome, telefone ou email)'},
+        {'name': 'page', 'in': 'query', 'type': 'integer', 'default': 1, 'description': 'Número da página'},
+        {'name': 'per_page', 'in': 'query', 'type': 'integer', 'default': 20, 'description': 'Itens por página'},
+        {'name': 'include_stats', 'in': 'query', 'type': 'boolean', 'default': False, 'description': 'Incluir estatísticas do cliente'}
+    ],
+    'responses': {
+        200: {
+            'description': 'Lista de clientes',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'clients': {'type': 'array', 'items': {'$ref': '#/definitions/Client'}},
+                    'pagination': {'$ref': '#/definitions/Pagination'}
+                }
+            }
+        }
+    }
+})
 def get_clients():
     """Listar todos os clientes"""
     try:
@@ -60,6 +84,27 @@ def get_clients():
 
 @clients_bp.route('/<int:client_id>', methods=['GET'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Clientes'],
+    'summary': 'Obter cliente específico',
+    'description': 'Retorna os dados de um cliente pelo ID',
+    'parameters': [
+        {'name': 'client_id', 'in': 'path', 'type': 'integer', 'required': True, 'description': 'ID do cliente'},
+        {'name': 'include_stats', 'in': 'query', 'type': 'boolean', 'default': False, 'description': 'Incluir estatísticas do cliente'}
+    ],
+    'responses': {
+        200: {
+            'description': 'Dados do cliente',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'client': {'$ref': '#/definitions/Client'}
+                }
+            }
+        },
+        404: {'description': 'Cliente não encontrado'}
+    }
+})
 def get_client(client_id):
     """Obter cliente específico"""
     try:
@@ -80,6 +125,41 @@ def get_client(client_id):
 
 @clients_bp.route('', methods=['POST'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Clientes'],
+    'summary': 'Criar novo cliente',
+    'description': 'Cria um novo cliente no sistema',
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['name'],
+                'properties': {
+                    'name': {'type': 'string', 'example': 'Maria Santos'},
+                    'phone': {'type': 'string', 'example': '(11) 99999-9999'},
+                    'email': {'type': 'string', 'example': 'maria@email.com'},
+                    'notes': {'type': 'string', 'example': 'Cliente VIP'}
+                }
+            }
+        }
+    ],
+    'responses': {
+        201: {
+            'description': 'Cliente criado com sucesso',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'message': {'type': 'string'},
+                    'client': {'$ref': '#/definitions/Client'}
+                }
+            }
+        },
+        400: {'description': 'Nome obrigatório ou email já em uso'}
+    }
+})
 def create_client():
     """Criar novo cliente"""
     try:
@@ -117,6 +197,43 @@ def create_client():
 
 @clients_bp.route('/<int:client_id>', methods=['PUT'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Clientes'],
+    'summary': 'Atualizar cliente',
+    'description': 'Atualiza os dados de um cliente existente',
+    'parameters': [
+        {'name': 'client_id', 'in': 'path', 'type': 'integer', 'required': True, 'description': 'ID do cliente'},
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['name'],
+                'properties': {
+                    'name': {'type': 'string', 'example': 'Maria Santos'},
+                    'phone': {'type': 'string', 'example': '(11) 99999-9999'},
+                    'email': {'type': 'string', 'example': 'maria@email.com'},
+                    'notes': {'type': 'string', 'example': 'Cliente VIP'}
+                }
+            }
+        }
+    ],
+    'responses': {
+        200: {
+            'description': 'Cliente atualizado com sucesso',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'message': {'type': 'string'},
+                    'client': {'$ref': '#/definitions/Client'}
+                }
+            }
+        },
+        400: {'description': 'Nome obrigatório ou email já em uso'},
+        404: {'description': 'Cliente não encontrado'}
+    }
+})
 def update_client(client_id):
     """Atualizar cliente"""
     try:
@@ -156,6 +273,19 @@ def update_client(client_id):
 
 @clients_bp.route('/<int:client_id>', methods=['DELETE'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Clientes'],
+    'summary': 'Excluir cliente',
+    'description': 'Remove um cliente do sistema. Não é possível excluir clientes com agendamentos.',
+    'parameters': [
+        {'name': 'client_id', 'in': 'path', 'type': 'integer', 'required': True, 'description': 'ID do cliente'}
+    ],
+    'responses': {
+        200: {'description': 'Cliente excluído com sucesso'},
+        400: {'description': 'Cliente possui agendamentos'},
+        404: {'description': 'Cliente não encontrado'}
+    }
+})
 def delete_client(client_id):
     """Excluir cliente"""
     try:
@@ -181,6 +311,26 @@ def delete_client(client_id):
 
 @clients_bp.route('/search', methods=['GET'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Clientes'],
+    'summary': 'Buscar clientes (autocomplete)',
+    'description': 'Busca rápida de clientes por nome ou telefone para autocomplete',
+    'parameters': [
+        {'name': 'q', 'in': 'query', 'type': 'string', 'required': True, 'description': 'Termo de busca'},
+        {'name': 'limit', 'in': 'query', 'type': 'integer', 'default': 10, 'description': 'Limite de resultados'}
+    ],
+    'responses': {
+        200: {
+            'description': 'Lista de clientes encontrados',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'clients': {'type': 'array', 'items': {'$ref': '#/definitions/Client'}}
+                }
+            }
+        }
+    }
+})
 def search_clients():
     """Buscar clientes por nome ou telefone (para autocomplete)"""
     try:

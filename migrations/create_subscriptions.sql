@@ -5,7 +5,7 @@
 -- Create subscriptions table
 CREATE TABLE IF NOT EXISTS subscriptions (
     id SERIAL PRIMARY KEY,
-    client_id INT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     plan VARCHAR(50) NOT NULL, -- basic, pro, enterprise
     stripe_customer_id VARCHAR(100),
     stripe_subscription_id VARCHAR(100) UNIQUE,
@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 );
 
 -- Create indexes for better query performance
-CREATE INDEX IF NOT EXISTS idx_subscriptions_client_id ON subscriptions(client_id);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_stripe_customer_id ON subscriptions(stripe_customer_id);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_stripe_subscription_id ON subscriptions(stripe_subscription_id);

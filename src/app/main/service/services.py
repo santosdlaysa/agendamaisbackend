@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required
+from flasgger import swag_from
 from src.models.user import db
 from src.models.service import Service
 from src.models.professional import Professional
@@ -8,6 +9,28 @@ services_bp = Blueprint('services', __name__)
 
 @services_bp.route('', methods=['GET'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Serviços'],
+    'summary': 'Listar todos os serviços',
+    'parameters': [
+        {'name': 'search', 'in': 'query', 'type': 'string', 'description': 'Buscar por nome'},
+        {'name': 'active_only', 'in': 'query', 'type': 'boolean', 'default': False},
+        {'name': 'professional_id', 'in': 'query', 'type': 'integer', 'description': 'Filtrar por profissional'},
+        {'name': 'include_professionals', 'in': 'query', 'type': 'boolean', 'default': False},
+        {'name': 'include_stats', 'in': 'query', 'type': 'boolean', 'default': False}
+    ],
+    'responses': {
+        200: {
+            'description': 'Lista de serviços',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'services': {'type': 'array', 'items': {'$ref': '#/definitions/Service'}}
+                }
+            }
+        }
+    }
+})
 def get_services():
     """Listar todos os serviços"""
     try:
@@ -51,6 +74,19 @@ def get_services():
 
 @services_bp.route('/<int:service_id>', methods=['GET'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Serviços'],
+    'summary': 'Obter serviço específico',
+    'parameters': [
+        {'name': 'service_id', 'in': 'path', 'type': 'integer', 'required': True},
+        {'name': 'include_professionals', 'in': 'query', 'type': 'boolean', 'default': True},
+        {'name': 'include_stats', 'in': 'query', 'type': 'boolean', 'default': False}
+    ],
+    'responses': {
+        200: {'description': 'Dados do serviço'},
+        404: {'description': 'Serviço não encontrado'}
+    }
+})
 def get_service(service_id):
     """Obter serviço específico"""
     try:
@@ -74,6 +110,34 @@ def get_service(service_id):
 
 @services_bp.route('', methods=['POST'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Serviços'],
+    'summary': 'Criar novo serviço',
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['name', 'price', 'duration'],
+                'properties': {
+                    'name': {'type': 'string', 'example': 'Massagem Relaxante'},
+                    'description': {'type': 'string', 'example': 'Massagem corporal completa'},
+                    'price': {'type': 'number', 'example': 150.00},
+                    'duration': {'type': 'integer', 'example': 60, 'description': 'Duração em minutos'},
+                    'color': {'type': 'string', 'example': '#10B981'},
+                    'active': {'type': 'boolean', 'default': True},
+                    'professional_ids': {'type': 'array', 'items': {'type': 'integer'}}
+                }
+            }
+        }
+    ],
+    'responses': {
+        201: {'description': 'Serviço criado com sucesso'},
+        400: {'description': 'Dados obrigatórios não fornecidos'}
+    }
+})
 def create_service():
     """Criar novo serviço"""
     try:
@@ -124,6 +188,36 @@ def create_service():
 
 @services_bp.route('/<int:service_id>', methods=['PUT'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Serviços'],
+    'summary': 'Atualizar serviço',
+    'parameters': [
+        {'name': 'service_id', 'in': 'path', 'type': 'integer', 'required': True},
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['name', 'price', 'duration'],
+                'properties': {
+                    'name': {'type': 'string'},
+                    'description': {'type': 'string'},
+                    'price': {'type': 'number'},
+                    'duration': {'type': 'integer'},
+                    'color': {'type': 'string'},
+                    'active': {'type': 'boolean'},
+                    'professional_ids': {'type': 'array', 'items': {'type': 'integer'}}
+                }
+            }
+        }
+    ],
+    'responses': {
+        200: {'description': 'Serviço atualizado com sucesso'},
+        400: {'description': 'Dados inválidos'},
+        404: {'description': 'Serviço não encontrado'}
+    }
+})
 def update_service(service_id):
     """Atualizar serviço"""
     try:
@@ -174,6 +268,19 @@ def update_service(service_id):
 
 @services_bp.route('/<int:service_id>', methods=['DELETE'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Serviços'],
+    'summary': 'Excluir serviço',
+    'description': 'Remove um serviço. Não é possível excluir com agendamentos futuros.',
+    'parameters': [
+        {'name': 'service_id', 'in': 'path', 'type': 'integer', 'required': True}
+    ],
+    'responses': {
+        200: {'description': 'Serviço excluído com sucesso'},
+        400: {'description': 'Serviço possui agendamentos futuros'},
+        404: {'description': 'Serviço não encontrado'}
+    }
+})
 def delete_service(service_id):
     """Excluir serviço"""
     try:
@@ -203,6 +310,17 @@ def delete_service(service_id):
 
 @services_bp.route('/<int:service_id>/professionals', methods=['GET'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Serviços'],
+    'summary': 'Obter profissionais de um serviço',
+    'parameters': [
+        {'name': 'service_id', 'in': 'path', 'type': 'integer', 'required': True}
+    ],
+    'responses': {
+        200: {'description': 'Lista de profissionais do serviço'},
+        404: {'description': 'Serviço não encontrado'}
+    }
+})
 def get_service_professionals(service_id):
     """Obter profissionais que realizam um serviço"""
     try:
@@ -220,6 +338,28 @@ def get_service_professionals(service_id):
 
 @services_bp.route('/<int:service_id>/professionals', methods=['POST'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Serviços'],
+    'summary': 'Atualizar profissionais de um serviço',
+    'parameters': [
+        {'name': 'service_id', 'in': 'path', 'type': 'integer', 'required': True},
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'professional_ids': {'type': 'array', 'items': {'type': 'integer'}}
+                }
+            }
+        }
+    ],
+    'responses': {
+        200: {'description': 'Profissionais atualizados com sucesso'},
+        404: {'description': 'Serviço não encontrado'}
+    }
+})
 def update_service_professionals(service_id):
     """Atualizar profissionais que realizam um serviço"""
     try:
@@ -249,6 +389,18 @@ def update_service_professionals(service_id):
 
 @services_bp.route('/<int:service_id>/toggle-status', methods=['POST'])
 # @jwt_required()  # Temporariamente desabilitado
+@swag_from({
+    'tags': ['Serviços'],
+    'summary': 'Ativar/desativar serviço',
+    'description': 'Alterna o status ativo/inativo do serviço',
+    'parameters': [
+        {'name': 'service_id', 'in': 'path', 'type': 'integer', 'required': True}
+    ],
+    'responses': {
+        200: {'description': 'Status alterado com sucesso'},
+        404: {'description': 'Serviço não encontrado'}
+    }
+})
 def toggle_service_status(service_id):
     """Ativar/desativar serviço"""
     try:

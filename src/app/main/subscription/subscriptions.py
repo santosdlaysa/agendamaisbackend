@@ -1,11 +1,15 @@
 import stripe
 import os
+from dotenv import load_dotenv
 from flask import Blueprint, request, jsonify
+
+load_dotenv()
 from flask_jwt_extended import jwt_required, get_jwt_identity
+from flasgger import swag_from
 from datetime import datetime, timedelta
 from src.config.database import db
 from src.models.subscription import Subscription
-from src.models.client import Client
+from src.models.user import User
 
 # Configurar Stripe
 stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
@@ -54,6 +58,33 @@ PLANS = {
 
 
 @subscriptions_bp.route('/plans', methods=['GET'])
+@swag_from({
+    'tags': ['Assinaturas'],
+    'summary': 'Listar planos disponíveis',
+    'description': 'Retorna todos os planos de assinatura disponíveis',
+    'responses': {
+        200: {
+            'description': 'Lista de planos',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'plans': {
+                        'type': 'array',
+                        'items': {
+                            'type': 'object',
+                            'properties': {
+                                'id': {'type': 'string', 'example': 'basic'},
+                                'name': {'type': 'string', 'example': 'Básico'},
+                                'price': {'type': 'number', 'example': 29},
+                                'features': {'type': 'array', 'items': {'type': 'string'}}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+})
 def get_plans():
     """Retorna os planos disponíveis"""
     return jsonify({
@@ -71,24 +102,63 @@ def get_plans():
 
 @subscriptions_bp.route('/subscribe', methods=['POST'])
 @jwt_required()
+@swag_from({
+    'tags': ['Assinaturas'],
+    'summary': 'Criar checkout para assinatura',
+    'description': 'Cria uma sessão de checkout do Stripe. O usuário deve cadastrar o cartão antes de iniciar o trial de 7 dias. Após o trial, a cobrança é automática.',
+    'security': [{'Bearer': []}],
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['plan'],
+                'properties': {
+                    'plan': {'type': 'string', 'enum': ['basic', 'pro', 'enterprise'], 'example': 'basic'},
+                    'success_url': {'type': 'string', 'example': 'https://seusite.com/sucesso'},
+                    'cancel_url': {'type': 'string', 'example': 'https://seusite.com/cancelado'}
+                }
+            }
+        }
+    ],
+    'responses': {
+        200: {
+            'description': 'Checkout criado - redirecionar usuário para checkout_url',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'checkout_url': {'type': 'string', 'description': 'URL para redirecionar o usuário'},
+                    'session_id': {'type': 'string', 'description': 'ID da sessão do Stripe'}
+                }
+            }
+        },
+        400: {'description': 'Plano inválido ou já possui assinatura ativa'},
+        401: {'description': 'Token não fornecido ou inválido'},
+        404: {'description': 'Usuário não encontrado'}
+    }
+})
 def create_subscription():
-    """Criar nova assinatura"""
+    """Criar nova assinatura via Stripe Checkout"""
     try:
         data = request.json
-        client_id = get_jwt_identity()
-        plan = data.get('plan')
+        user_id = int(get_jwt_identity())
+        plan = data.get('plan') if data else None
+        success_url = data.get('success_url', 'http://localhost:3000/subscription/success')
+        cancel_url = data.get('cancel_url', 'http://localhost:3000/subscription/cancel')
 
         # Validar plano
-        if plan not in PLANS:
-            return jsonify({'error': 'Plano inválido'}), 400
+        if not plan or plan not in PLANS:
+            return jsonify({'error': f'Plano inválido. Recebido: {plan}. Válidos: {list(PLANS.keys())}'}), 400
 
-        # Buscar cliente
-        client = Client.query.get(client_id)
-        if not client:
-            return jsonify({'error': 'Cliente não encontrado'}), 404
+        # Buscar usuário
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'Usuário não encontrado'}), 404
 
         # Verificar se já tem assinatura ativa
-        existing = Subscription.query.filter_by(client_id=client_id).first()
+        existing = Subscription.query.filter_by(user_id=user_id).first()
         if existing and existing.status in ['active', 'trialing']:
             return jsonify({'error': 'Já existe uma assinatura ativa'}), 400
 
@@ -98,60 +168,61 @@ def create_subscription():
             stripe_customer_id = existing.stripe_customer_id
         else:
             customer = stripe.Customer.create(
-                email=client.email,
-                name=client.name,
-                metadata={'client_id': str(client_id)}
+                email=user.email,
+                name=user.name,
+                metadata={'user_id': str(user_id)}
             )
             stripe_customer_id = customer.id
 
-        # Criar assinatura no Stripe com trial de 7 dias
-        stripe_subscription = stripe.Subscription.create(
+        # Criar Checkout Session - coleta cartão antes do trial
+        checkout_session = stripe.checkout.Session.create(
             customer=stripe_customer_id,
-            items=[{'price': PLANS[plan]['price_id']}],
-            trial_period_days=7,
-            payment_behavior='default_incomplete',
-            payment_settings={
-                'save_default_payment_method': 'on_subscription'
+            payment_method_types=['card'],
+            mode='subscription',
+            line_items=[{
+                'price': PLANS[plan]['price_id'],
+                'quantity': 1
+            }],
+            subscription_data={
+                'trial_period_days': 7,
+                'metadata': {
+                    'user_id': str(user_id),
+                    'plan': plan
+                }
             },
-            expand=['latest_invoice.payment_intent']
+            success_url=success_url + '?session_id={CHECKOUT_SESSION_ID}',
+            cancel_url=cancel_url,
+            metadata={
+                'user_id': str(user_id),
+                'plan': plan
+            }
         )
 
-        # Calcular data de fim do trial
-        trial_end = datetime.utcnow() + timedelta(days=7)
-
-        # Criar ou atualizar assinatura no banco
+        # Salvar registro pendente no banco
         if existing:
             existing.plan = plan
             existing.stripe_customer_id = stripe_customer_id
-            existing.stripe_subscription_id = stripe_subscription.id
-            existing.status = 'trialing'
-            existing.start_date = datetime.utcnow()
-            existing.trial_end = trial_end
+            existing.status = 'pending'
             existing.cancel_at_period_end = False
             existing.end_date = None
             subscription = existing
         else:
             subscription = Subscription(
-                client_id=client_id,
+                user_id=user_id,
                 plan=plan,
                 stripe_customer_id=stripe_customer_id,
-                stripe_subscription_id=stripe_subscription.id,
-                status='trialing',
-                trial_end=trial_end
+                status='pending'
             )
             db.session.add(subscription)
 
         db.session.commit()
 
         return jsonify({
-            'subscription_id': subscription.id,
-            'stripe_subscription_id': stripe_subscription.id,
-            'client_secret': stripe_subscription.latest_invoice.payment_intent.client_secret,
-            'status': subscription.status,
-            'trial_end': trial_end.isoformat()
-        }), 201
+            'checkout_url': checkout_session.url,
+            'session_id': checkout_session.id
+        }), 200
 
-    except stripe.error.StripeError as e:
+    except stripe.StripeError as e:
         db.session.rollback()
         return jsonify({'error': f'Erro no Stripe: {str(e)}'}), 400
     except Exception as e:
@@ -161,15 +232,36 @@ def create_subscription():
 
 @subscriptions_bp.route('/status', methods=['GET'])
 @jwt_required()
+@swag_from({
+    'tags': ['Assinaturas'],
+    'summary': 'Obter status da assinatura',
+    'description': 'Retorna o status atual da assinatura do cliente autenticado',
+    'security': [{'Bearer': []}],
+    'responses': {
+        200: {
+            'description': 'Status da assinatura',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'has_subscription': {'type': 'boolean'},
+                    'subscription': {'$ref': '#/definitions/Subscription'}
+                }
+            }
+        },
+        401: {'description': 'Token não fornecido ou inválido'}
+    }
+})
 def get_subscription_status():
-    """Obter status da assinatura do cliente"""
+    """Obter status da assinatura do usuário"""
     try:
-        client_id = get_jwt_identity()
+        user_id = int(get_jwt_identity())
 
-        subscription = Subscription.query.filter_by(client_id=client_id).first()
+        subscription = Subscription.query.filter_by(user_id=user_id).first()
 
         if not subscription:
             return jsonify({'has_subscription': False}), 200
+
+        has_payment_method = False
 
         # Tentar sincronizar com Stripe
         if subscription.stripe_subscription_id:
@@ -178,26 +270,132 @@ def get_subscription_status():
                 subscription.status = stripe_sub.status
                 subscription.cancel_at_period_end = stripe_sub.cancel_at_period_end
                 db.session.commit()
-            except stripe.error.StripeError as e:
+            except stripe.StripeError as e:
                 print(f"Erro ao sincronizar com Stripe: {e}")
+
+        # Verificar se tem método de pagamento cadastrado
+        if subscription.stripe_customer_id:
+            try:
+                payment_methods = stripe.PaymentMethod.list(
+                    customer=subscription.stripe_customer_id,
+                    type='card'
+                )
+                has_payment_method = len(payment_methods.data) > 0
+            except stripe.StripeError as e:
+                print(f"Erro ao verificar payment methods: {e}")
+
+        subscription_data = subscription.to_dict()
+        subscription_data['has_payment_method'] = has_payment_method
 
         return jsonify({
             'has_subscription': True,
-            'subscription': subscription.to_dict()
+            'subscription': subscription_data
         }), 200
 
     except Exception as e:
         return jsonify({'error': f'Erro ao buscar assinatura: {str(e)}'}), 500
 
 
+@subscriptions_bp.route('/change-plan', methods=['POST'])
+@jwt_required()
+@swag_from({
+    'tags': ['Assinaturas'],
+    'summary': 'Alterar plano',
+    'description': 'Altera o plano da assinatura atual. A mudança é aplicada imediatamente com proration.',
+    'security': [{'Bearer': []}],
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['plan'],
+                'properties': {
+                    'plan': {'type': 'string', 'enum': ['basic', 'pro', 'enterprise'], 'example': 'pro'}
+                }
+            }
+        }
+    ],
+    'responses': {
+        200: {'description': 'Plano alterado com sucesso'},
+        400: {'description': 'Plano inválido ou igual ao atual'},
+        401: {'description': 'Token não fornecido ou inválido'},
+        404: {'description': 'Assinatura não encontrada'}
+    }
+})
+def change_plan():
+    """Alterar plano da assinatura"""
+    try:
+        user_id = int(get_jwt_identity())
+        data = request.json
+        new_plan = data.get('plan') if data else None
+
+        # Validar plano
+        if not new_plan or new_plan not in PLANS:
+            return jsonify({'error': f'Plano inválido. Válidos: {list(PLANS.keys())}'}), 400
+
+        # Buscar assinatura
+        subscription = Subscription.query.filter_by(user_id=user_id).first()
+
+        if not subscription:
+            return jsonify({'error': 'Assinatura não encontrada'}), 404
+
+        if subscription.status not in ['active', 'trialing']:
+            return jsonify({'error': 'Assinatura não está ativa'}), 400
+
+        if subscription.plan == new_plan:
+            return jsonify({'error': 'Você já está neste plano'}), 400
+
+        # Buscar assinatura no Stripe
+        stripe_sub = stripe.Subscription.retrieve(subscription.stripe_subscription_id)
+
+        # Atualizar para o novo plano (com proration)
+        stripe.Subscription.modify(
+            subscription.stripe_subscription_id,
+            items=[{
+                'id': stripe_sub['items']['data'][0]['id'],
+                'price': PLANS[new_plan]['price_id']
+            }],
+            proration_behavior='create_prorations'
+        )
+
+        # Atualizar no banco
+        old_plan = subscription.plan
+        subscription.plan = new_plan
+        db.session.commit()
+
+        return jsonify({
+            'message': f'Plano alterado de {old_plan} para {new_plan}',
+            'subscription': subscription.to_dict()
+        }), 200
+
+    except stripe.StripeError as e:
+        return jsonify({'error': f'Erro no Stripe: {str(e)}'}), 400
+    except Exception as e:
+        return jsonify({'error': f'Erro ao alterar plano: {str(e)}'}), 500
+
+
 @subscriptions_bp.route('/cancel', methods=['POST'])
 @jwt_required()
+@swag_from({
+    'tags': ['Assinaturas'],
+    'summary': 'Cancelar assinatura',
+    'description': 'Cancela a assinatura ao fim do período atual',
+    'security': [{'Bearer': []}],
+    'responses': {
+        200: {'description': 'Assinatura será cancelada ao fim do período'},
+        400: {'description': 'Assinatura não está ativa'},
+        401: {'description': 'Token não fornecido ou inválido'},
+        404: {'description': 'Assinatura não encontrada'}
+    }
+})
 def cancel_subscription():
     """Cancelar assinatura ao fim do período"""
     try:
-        client_id = get_jwt_identity()
+        user_id = int(get_jwt_identity())
 
-        subscription = Subscription.query.filter_by(client_id=client_id).first()
+        subscription = Subscription.query.filter_by(user_id=user_id).first()
 
         if not subscription:
             return jsonify({'error': 'Assinatura não encontrada'}), 404
@@ -219,7 +417,7 @@ def cancel_subscription():
             'subscription': subscription.to_dict()
         }), 200
 
-    except stripe.error.StripeError as e:
+    except stripe.StripeError as e:
         return jsonify({'error': f'Erro no Stripe: {str(e)}'}), 400
     except Exception as e:
         return jsonify({'error': f'Erro ao cancelar assinatura: {str(e)}'}), 500
@@ -227,12 +425,24 @@ def cancel_subscription():
 
 @subscriptions_bp.route('/reactivate', methods=['POST'])
 @jwt_required()
+@swag_from({
+    'tags': ['Assinaturas'],
+    'summary': 'Reativar assinatura',
+    'description': 'Reativa uma assinatura que foi marcada para cancelamento',
+    'security': [{'Bearer': []}],
+    'responses': {
+        200: {'description': 'Assinatura reativada com sucesso'},
+        400: {'description': 'Assinatura não está marcada para cancelamento'},
+        401: {'description': 'Token não fornecido ou inválido'},
+        404: {'description': 'Assinatura não encontrada'}
+    }
+})
 def reactivate_subscription():
     """Reativar assinatura cancelada"""
     try:
-        client_id = get_jwt_identity()
+        user_id = int(get_jwt_identity())
 
-        subscription = Subscription.query.filter_by(client_id=client_id).first()
+        subscription = Subscription.query.filter_by(user_id=user_id).first()
 
         if not subscription:
             return jsonify({'error': 'Assinatura não encontrada'}), 404
@@ -254,13 +464,92 @@ def reactivate_subscription():
             'subscription': subscription.to_dict()
         }), 200
 
-    except stripe.error.StripeError as e:
+    except stripe.StripeError as e:
         return jsonify({'error': f'Erro no Stripe: {str(e)}'}), 400
     except Exception as e:
         return jsonify({'error': f'Erro ao reativar assinatura: {str(e)}'}), 500
 
 
+@subscriptions_bp.route('/billing-portal', methods=['POST'])
+@jwt_required()
+@swag_from({
+    'tags': ['Assinaturas'],
+    'summary': 'Acessar portal de billing',
+    'description': 'Cria uma sessão do Stripe Billing Portal onde o usuário pode gerenciar seu cartão, ver faturas e cancelar assinatura',
+    'security': [{'Bearer': []}],
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['return_url'],
+                'properties': {
+                    'return_url': {'type': 'string', 'example': 'https://seusite.com/conta'}
+                }
+            }
+        }
+    ],
+    'responses': {
+        200: {
+            'description': 'URL do portal de billing',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'url': {'type': 'string', 'description': 'URL para redirecionar o usuário ao portal'}
+                }
+            }
+        },
+        400: {'description': 'return_url não fornecida'},
+        401: {'description': 'Token não fornecido ou inválido'},
+        404: {'description': 'Assinatura não encontrada'}
+    }
+})
+def create_billing_portal():
+    """Criar sessão do Stripe Billing Portal"""
+    try:
+        user_id = int(get_jwt_identity())
+        data = request.json
+        return_url = data.get('return_url') if data else None
+
+        if not return_url:
+            return jsonify({'error': 'return_url é obrigatória'}), 400
+
+        # Buscar assinatura do usuário
+        subscription = Subscription.query.filter_by(user_id=user_id).first()
+
+        if not subscription or not subscription.stripe_customer_id:
+            return jsonify({'error': 'Assinatura não encontrada'}), 404
+
+        # Criar sessão do Billing Portal
+        portal_session = stripe.billing_portal.Session.create(
+            customer=subscription.stripe_customer_id,
+            return_url=return_url
+        )
+
+        return jsonify({'url': portal_session.url}), 200
+
+    except stripe.StripeError as e:
+        return jsonify({'error': f'Erro no Stripe: {str(e)}'}), 400
+    except Exception as e:
+        return jsonify({'error': f'Erro ao criar portal: {str(e)}'}), 500
+
+
 @subscriptions_bp.route('/webhook', methods=['POST'])
+@swag_from({
+    'tags': ['Assinaturas'],
+    'summary': 'Webhook do Stripe',
+    'description': 'Endpoint para receber eventos do Stripe (pagamentos, cancelamentos, etc.)',
+    'parameters': [
+        {'name': 'Stripe-Signature', 'in': 'header', 'type': 'string', 'required': True, 'description': 'Assinatura do Stripe'}
+    ],
+    'responses': {
+        200: {'description': 'Evento processado com sucesso'},
+        400: {'description': 'Payload ou assinatura inválida'},
+        500: {'description': 'Webhook secret não configurado'}
+    }
+})
 def stripe_webhook():
     """Webhook do Stripe para eventos de assinatura"""
     payload = request.data
@@ -276,7 +565,7 @@ def stripe_webhook():
         )
     except ValueError:
         return jsonify({'error': 'Payload inválido'}), 400
-    except stripe.error.SignatureVerificationError:
+    except stripe.SignatureVerificationError:
         return jsonify({'error': 'Assinatura inválida'}), 400
 
     # Processar eventos
@@ -285,7 +574,32 @@ def stripe_webhook():
 
     print(f"Webhook recebido: {event_type}")
 
-    if event_type == 'invoice.paid':
+    if event_type == 'checkout.session.completed':
+        # Checkout completado - usuário cadastrou cartão e iniciou trial
+        session = data_object
+        stripe_subscription_id = session.get('subscription')
+        stripe_customer_id = session.get('customer')
+        user_id = session.get('metadata', {}).get('user_id')
+        plan = session.get('metadata', {}).get('plan')
+
+        if user_id and stripe_subscription_id:
+            subscription = Subscription.query.filter_by(user_id=int(user_id)).first()
+
+            if subscription:
+                # Buscar dados da assinatura no Stripe
+                stripe_sub = stripe.Subscription.retrieve(stripe_subscription_id)
+                trial_end = datetime.fromtimestamp(stripe_sub.trial_end) if stripe_sub.trial_end else None
+
+                subscription.stripe_subscription_id = stripe_subscription_id
+                subscription.stripe_customer_id = stripe_customer_id
+                subscription.status = stripe_sub.status  # 'trialing'
+                subscription.start_date = datetime.utcnow()
+                subscription.trial_end = trial_end
+                subscription.plan = plan or subscription.plan
+                db.session.commit()
+                print(f"Checkout completado - Assinatura {stripe_subscription_id} ativada em trial")
+
+    elif event_type == 'invoice.paid':
         # Pagamento bem-sucedido
         subscription_id = data_object.get('subscription')
         subscription = Subscription.query.filter_by(
