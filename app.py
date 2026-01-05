@@ -10,6 +10,7 @@ from src.app.main.professional.professionals import professionals_bp
 from src.app.main.service.services import services_bp
 from src.app.main.appointment.appointments import appointments_bp
 from src.app.main.subscription.subscriptions import subscriptions_bp
+from src.app.main.public.booking import public_bp
 # Import reminder blueprint conditionally
 try:
     from src.app.main.reminder.reminders import reminders_bp
@@ -209,6 +210,7 @@ def create_app():
     app.register_blueprint(services_bp, url_prefix='/api/services')
     app.register_blueprint(appointments_bp, url_prefix='/api/appointments')
     app.register_blueprint(subscriptions_bp, url_prefix='/api/subscriptions')
+    app.register_blueprint(public_bp, url_prefix='/api/public')
 
     # Register reminder blueprint if available
     if REMINDERS_AVAILABLE and reminders_bp:

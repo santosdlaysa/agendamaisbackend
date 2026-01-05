@@ -241,3 +241,138 @@ def change_password():
         db.session.rollback()
         return jsonify(message=f'Erro ao alterar senha: {str(e)}'), 500
 
+
+@auth_bp.route('/business', methods=['GET'])
+@jwt_required()
+@swag_from({
+    'tags': ['Autenticação'],
+    'summary': 'Obter dados da empresa',
+    'description': 'Retorna os dados do estabelecimento do usuário autenticado',
+    'security': [{'Bearer': []}],
+    'responses': {
+        200: {
+            'description': 'Dados da empresa',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'slug': {'type': 'string'},
+                    'business_name': {'type': 'string'},
+                    'business_phone': {'type': 'string'},
+                    'business_address': {'type': 'string'},
+                    'business_logo': {'type': 'string'},
+                    'online_booking_enabled': {'type': 'boolean'}
+                }
+            }
+        },
+        401: {'description': 'Token não fornecido ou inválido'},
+        404: {'description': 'Usuário não encontrado'}
+    }
+})
+def get_business():
+    """Obter dados da empresa"""
+    try:
+        user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
+
+        if not user:
+            return jsonify(message='Usuário não encontrado'), 404
+
+        return jsonify({
+            'slug': user.slug,
+            'business_name': user.business_name,
+            'business_phone': user.business_phone,
+            'business_address': user.business_address,
+            'business_logo': user.business_logo,
+            'online_booking_enabled': user.online_booking_enabled
+        }), 200
+
+    except Exception as e:
+        return jsonify(message=f'Erro ao obter dados da empresa: {str(e)}'), 500
+
+
+@auth_bp.route('/business', methods=['PUT'])
+@jwt_required()
+@swag_from({
+    'tags': ['Autenticação'],
+    'summary': 'Atualizar dados da empresa',
+    'description': 'Atualiza os dados do estabelecimento para agendamento online',
+    'security': [{'Bearer': []}],
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'slug': {'type': 'string', 'example': 'minha-barbearia'},
+                    'business_name': {'type': 'string', 'example': 'Minha Barbearia'},
+                    'business_phone': {'type': 'string', 'example': '(11) 99999-9999'},
+                    'business_address': {'type': 'string', 'example': 'Rua das Flores, 123'},
+                    'business_logo': {'type': 'string', 'example': 'https://...'},
+                    'online_booking_enabled': {'type': 'boolean', 'example': True}
+                }
+            }
+        }
+    ],
+    'responses': {
+        200: {'description': 'Dados atualizados com sucesso'},
+        400: {'description': 'Slug já está em uso'},
+        401: {'description': 'Token não fornecido ou inválido'},
+        404: {'description': 'Usuário não encontrado'}
+    }
+})
+def update_business():
+    """Atualizar dados da empresa"""
+    try:
+        data = request.get_json()
+        user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
+
+        if not user:
+            return jsonify(message='Usuário não encontrado'), 404
+
+        # Verificar se slug já está em uso por outro usuário
+        if data.get('slug'):
+            slug = data['slug'].lower().strip()
+            # Remover caracteres especiais e espaços
+            slug = ''.join(c if c.isalnum() or c == '-' else '-' for c in slug)
+            slug = '-'.join(filter(None, slug.split('-')))  # Remove hífens duplicados
+
+            existing = User.query.filter(User.slug == slug, User.id != user_id).first()
+            if existing:
+                return jsonify(message='Este slug já está em uso'), 400
+            user.slug = slug
+
+        if 'business_name' in data:
+            user.business_name = data['business_name']
+
+        if 'business_phone' in data:
+            user.business_phone = data['business_phone']
+
+        if 'business_address' in data:
+            user.business_address = data['business_address']
+
+        if 'business_logo' in data:
+            user.business_logo = data['business_logo']
+
+        if 'online_booking_enabled' in data:
+            user.online_booking_enabled = data['online_booking_enabled']
+
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Dados da empresa atualizados com sucesso',
+            'business': {
+                'slug': user.slug,
+                'business_name': user.business_name,
+                'business_phone': user.business_phone,
+                'business_address': user.business_address,
+                'business_logo': user.business_logo,
+                'online_booking_enabled': user.online_booking_enabled
+            }
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify(message=f'Erro ao atualizar dados da empresa: {str(e)}'), 500

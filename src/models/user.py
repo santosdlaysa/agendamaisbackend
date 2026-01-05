@@ -4,7 +4,7 @@ from datetime import datetime
 
 class User(db.Model):
     __tablename__ = 'users'
-    
+
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(255), nullable=False)
     email = db.Column(db.String(255), nullable=False, unique=True)
@@ -13,6 +13,14 @@ class User(db.Model):
     active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Dados do estabelecimento para agendamento online
+    slug = db.Column(db.String(100), unique=True, nullable=True)
+    business_name = db.Column(db.String(255), nullable=True)
+    business_phone = db.Column(db.String(20), nullable=True)
+    business_address = db.Column(db.String(500), nullable=True)
+    business_logo = db.Column(db.String(500), nullable=True)
+    online_booking_enabled = db.Column(db.Boolean, default=True)
     
     def set_password(self, password):
         """Define a senha do usuário usando hash"""
@@ -30,6 +38,23 @@ class User(db.Model):
             'email': self.email,
             'role': self.role,
             'active': self.active,
+            'slug': self.slug,
+            'business_name': self.business_name,
+            'business_phone': self.business_phone,
+            'business_address': self.business_address,
+            'business_logo': self.business_logo,
+            'online_booking_enabled': self.online_booking_enabled,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
+    def to_public_dict(self):
+        """Dados públicos do estabelecimento para agendamento online"""
+        return {
+            'slug': self.slug,
+            'business_name': self.business_name or self.name,
+            'business_phone': self.business_phone,
+            'business_address': self.business_address,
+            'business_logo': self.business_logo,
+            'online_booking_enabled': self.online_booking_enabled
         }
