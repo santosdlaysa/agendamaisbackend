@@ -19,7 +19,9 @@
       "Bash(py:*)",
       "Bash(dir \"C:\\\\Users\\\\santo\\\\WebstormProjects\\\\agendamaisbackend\\\\src\\\\app\\\\main\")",
       "Bash(findstr:*)",
-      "Bash(psql:*)"
+      "Bash(psql:*)",
+      "Bash(dir:*)",
+      "Bash(cat:*)"
     ],
     "deny": [],
     "ask": []
