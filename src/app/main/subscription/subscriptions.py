@@ -193,7 +193,7 @@ def create_subscription():
                     'plan': plan
                 }
             },
-            success_url=success_url + '?session_id={CHECKOUT_SESSION_ID}',
+            success_url=success_url if '{CHECKOUT_SESSION_ID}' in success_url else success_url + '?session_id={CHECKOUT_SESSION_ID}',
             cancel_url=cancel_url,
             metadata={
                 'user_id': str(user_id),
@@ -712,7 +712,7 @@ def retry_checkout():
                     'plan': plan
                 }
             },
-            success_url=success_url + '?session_id={CHECKOUT_SESSION_ID}',
+            success_url=success_url if '{CHECKOUT_SESSION_ID}' in success_url else success_url + '?session_id={CHECKOUT_SESSION_ID}',
             cancel_url=cancel_url,
             metadata={
                 'user_id': str(user_id),
