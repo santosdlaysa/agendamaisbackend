@@ -1,9 +1,12 @@
 import stripe
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 from flask import Blueprint, request, jsonify
 
-load_dotenv()
+# Carregar .env do diretório raiz do projeto
+env_path = Path(__file__).resolve().parents[4] / '.env'
+load_dotenv(env_path)
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from flasgger import swag_from
 from datetime import datetime, timedelta
@@ -190,7 +193,7 @@ def create_subscription():
                     'plan': plan
                 }
             },
-            success_url=success_url + '?session_id={CHECKOUT_SESSION_ID}',
+            success_url=success_url if '{CHECKOUT_SESSION_ID}' in success_url else success_url + '?session_id={CHECKOUT_SESSION_ID}',
             cancel_url=cancel_url,
             metadata={
                 'user_id': str(user_id),
@@ -709,7 +712,7 @@ def retry_checkout():
                     'plan': plan
                 }
             },
-            success_url=success_url + '?session_id={CHECKOUT_SESSION_ID}',
+            success_url=success_url if '{CHECKOUT_SESSION_ID}' in success_url else success_url + '?session_id={CHECKOUT_SESSION_ID}',
             cancel_url=cancel_url,
             metadata={
                 'user_id': str(user_id),

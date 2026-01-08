@@ -236,11 +236,16 @@ def create_app():
     # Register reminder blueprint if available
     if REMINDERS_AVAILABLE and reminders_bp:
         app.register_blueprint(reminders_bp, url_prefix='/api/reminders')
-    
+
+    # Health check endpoint
+    @app.route('/health')
+    def health_check():
+        return {'status': 'healthy', 'service': 'agendamais-api'}, 200
+
     # Criar tabelas
     with app.app_context():
         init_db()
-    
+
     return app
 
 if __name__ == '__main__':
