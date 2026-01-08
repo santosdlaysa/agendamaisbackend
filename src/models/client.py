@@ -3,15 +3,18 @@ from datetime import datetime
 
 class Client(db.Model):
     __tablename__ = 'clients'
-    
+
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)  # Empresa dona do cliente
     name = db.Column(db.String(255), nullable=False)
     phone = db.Column(db.String(20))
     email = db.Column(db.String(255))
     notes = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
+    # Relacionamentos
+    user = db.relationship('User', backref=db.backref('clients', lazy=True))
     appointments = db.relationship('Appointment', backref='client', lazy=True)
     
     def to_dict(self):

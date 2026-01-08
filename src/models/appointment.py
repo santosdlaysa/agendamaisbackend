@@ -1,5 +1,5 @@
 from src.config.database import db
-from datetime import datetime
+from datetime import datetime, timedelta
 import secrets
 import string
 
@@ -7,6 +7,10 @@ def generate_booking_code():
     """Gera código único de 8 caracteres para agendamento"""
     chars = string.ascii_uppercase + string.digits
     return ''.join(secrets.choice(chars) for _ in range(8))
+
+def generate_confirmation_token():
+    """Gera token único de 32 caracteres para confirmação"""
+    return secrets.token_urlsafe(24)
 
 class Appointment(db.Model):
     __tablename__ = 'appointments'
@@ -31,6 +35,12 @@ class Appointment(db.Model):
     booking_code = db.Column(db.String(8), unique=True, nullable=True)
     source = db.Column(db.String(20), default='admin')  # 'admin' ou 'online'
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)  # Estabelecimento dono
+
+    # Campos para confirmação de agendamento
+    confirmation_token = db.Column(db.String(64), unique=True, nullable=True)
+    confirmation_token_expires = db.Column(db.DateTime, nullable=True)
+    confirmed_at = db.Column(db.DateTime, nullable=True)
+    confirmation_sent_at = db.Column(db.DateTime, nullable=True)
     
     def to_dict(self):
         """Converte o objeto para dicionário"""
@@ -144,14 +154,62 @@ class Appointment(db.Model):
             Appointment.appointment_date == appointment_date,
             Appointment.status.in_(['scheduled', 'confirmed'])
         )
-        
+
         if exclude_appointment_id:
             query = query.filter(Appointment.id != exclude_appointment_id)
-        
+
         existing_appointments = query.all()
-        
+
         for apt in existing_appointments:
             if (start_time < apt.end_time and end_time > apt.start_time):
                 return True
-        
+
         return False
+
+    def generate_confirmation_token(self, expires_hours=24):
+        """Gera token de confirmação com expiração"""
+        self.confirmation_token = generate_confirmation_token()
+        self.confirmation_token_expires = datetime.utcnow() + timedelta(hours=expires_hours)
+        self.confirmation_sent_at = datetime.utcnow()
+        return self.confirmation_token
+
+    def confirm_appointment(self, token):
+        """Confirma o agendamento usando o token"""
+        if not self.confirmation_token:
+            return {'success': False, 'error': 'Agendamento não requer confirmação'}
+
+        if self.confirmation_token != token:
+            return {'success': False, 'error': 'Token inválido'}
+
+        if self.confirmation_token_expires and datetime.utcnow() > self.confirmation_token_expires:
+            return {'success': False, 'error': 'Token expirado'}
+
+        if self.confirmed_at:
+            return {'success': False, 'error': 'Agendamento já confirmado'}
+
+        self.confirmed_at = datetime.utcnow()
+        self.status = 'confirmed'
+        self.updated_at = datetime.utcnow()
+
+        return {
+            'success': True,
+            'message': 'Agendamento confirmado com sucesso',
+            'confirmed_at': self.confirmed_at.isoformat()
+        }
+
+    def is_confirmation_pending(self):
+        """Verifica se o agendamento está pendente de confirmação"""
+        if not self.confirmation_token:
+            return False
+        return self.confirmed_at is None and self.status == 'scheduled'
+
+    def is_confirmation_expired(self):
+        """Verifica se o token de confirmação expirou"""
+        if not self.confirmation_token_expires:
+            return False
+        return datetime.utcnow() > self.confirmation_token_expires
+
+    @staticmethod
+    def find_by_confirmation_token(token):
+        """Busca agendamento pelo token de confirmação"""
+        return Appointment.query.filter_by(confirmation_token=token).first()

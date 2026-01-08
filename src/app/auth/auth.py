@@ -1,7 +1,8 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from flasgger import swag_from
 from src.models.user import db, User
+from src.services.email_service import send_verification_email
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -62,13 +63,24 @@ def register():
             role=data.get('role', 'admin')
         )
         user.set_password(data['password'])
-        
+
+        # Gerar token de verificação de email
+        token = user.generate_email_verification_token()
+
         db.session.add(user)
         db.session.commit()
-        
+
+        # Enviar email de verificação
+        frontend_url = current_app.config.get('FRONTEND_URL', 'http://localhost:3000')
+        verification_url = f"{frontend_url}/verificar-email?token={token}"
+
+        email_sent, email_msg = send_verification_email(user, verification_url)
+
         return jsonify(
-            message='Usuário criado com sucesso',
-            user=user.to_dict()
+            message='Usuário criado com sucesso. Verifique seu email para confirmar o cadastro.',
+            user=user.to_dict(),
+            email_sent=email_sent,
+            email_message=email_msg if not email_sent else None
         ), 201
         
     except Exception as e:
@@ -138,12 +150,22 @@ def login():
         
         # Criar token de acesso (identity deve ser string)
         access_token = create_access_token(identity=str(user.id))
-        
-        return jsonify(
-            message='Login realizado com sucesso',
-            access_token=access_token,
-            user=user.to_dict()
-        ), 200
+
+        # Preparar resposta
+        response_data = {
+            'message': 'Login realizado com sucesso',
+            'access_token': access_token,
+            'user': user.to_dict()
+        }
+
+        # Adicionar aviso se email não verificado
+        if not user.email_verified:
+            response_data['warning'] = 'Seu email ainda não foi verificado. Verifique sua caixa de entrada.'
+            response_data['email_verified'] = False
+        else:
+            response_data['email_verified'] = True
+
+        return jsonify(response_data), 200
         
     except Exception as e:
         return jsonify(message=f'Erro ao fazer login: {str(e)}'), 500
@@ -240,6 +262,108 @@ def change_password():
     except Exception as e:
         db.session.rollback()
         return jsonify(message=f'Erro ao alterar senha: {str(e)}'), 500
+
+
+@auth_bp.route('/verify-email/<token>', methods=['GET'])
+@swag_from({
+    'tags': ['Autenticação'],
+    'summary': 'Verificar email',
+    'description': 'Verifica o email do usuário usando o token enviado por email',
+    'parameters': [
+        {
+            'name': 'token',
+            'in': 'path',
+            'required': True,
+            'type': 'string',
+            'description': 'Token de verificação de email'
+        }
+    ],
+    'responses': {
+        200: {'description': 'Email verificado com sucesso'},
+        400: {'description': 'Token inválido ou expirado'},
+        404: {'description': 'Token não encontrado'}
+    }
+})
+def verify_email(token):
+    """Verificar email do usuário"""
+    try:
+        user = User.find_by_verification_token(token)
+
+        if not user:
+            return jsonify(message='Token de verificação não encontrado'), 404
+
+        success, message = user.verify_email(token)
+
+        if success:
+            db.session.commit()
+            return jsonify(message=message), 200
+        else:
+            return jsonify(message=message), 400
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify(message=f'Erro ao verificar email: {str(e)}'), 500
+
+
+@auth_bp.route('/resend-verification', methods=['POST'])
+@swag_from({
+    'tags': ['Autenticação'],
+    'summary': 'Reenviar email de verificação',
+    'description': 'Reenvia o email de verificação para o usuário',
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['email'],
+                'properties': {
+                    'email': {'type': 'string', 'example': 'usuario@email.com'}
+                }
+            }
+        }
+    ],
+    'responses': {
+        200: {'description': 'Email de verificação reenviado'},
+        400: {'description': 'Email já verificado'},
+        404: {'description': 'Usuário não encontrado'}
+    }
+})
+def resend_verification():
+    """Reenviar email de verificação"""
+    try:
+        data = request.get_json()
+
+        if not data.get('email'):
+            return jsonify(message='Email é obrigatório'), 400
+
+        user = User.query.filter_by(email=data['email']).first()
+
+        if not user:
+            return jsonify(message='Usuário não encontrado'), 404
+
+        if user.email_verified:
+            return jsonify(message='Este email já foi verificado'), 400
+
+        # Gerar novo token
+        token = user.generate_email_verification_token()
+        db.session.commit()
+
+        # Enviar email
+        frontend_url = current_app.config.get('FRONTEND_URL', 'http://localhost:3000')
+        verification_url = f"{frontend_url}/verificar-email?token={token}"
+
+        email_sent, email_msg = send_verification_email(user, verification_url)
+
+        if email_sent:
+            return jsonify(message='Email de verificação reenviado com sucesso'), 200
+        else:
+            return jsonify(message=f'Erro ao enviar email: {email_msg}'), 500
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify(message=f'Erro ao reenviar verificação: {str(e)}'), 500
 
 
 @auth_bp.route('/business', methods=['GET'])

@@ -536,6 +536,202 @@ def create_billing_portal():
         return jsonify({'error': f'Erro ao criar portal: {str(e)}'}), 500
 
 
+@subscriptions_bp.route('/verify-checkout', methods=['POST'])
+@jwt_required()
+@swag_from({
+    'tags': ['Assinaturas'],
+    'summary': 'Verificar checkout completado',
+    'description': 'Verifica se o checkout foi completado e atualiza a assinatura. Usar após retorno do Stripe.',
+    'security': [{'Bearer': []}],
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['session_id'],
+                'properties': {
+                    'session_id': {'type': 'string', 'description': 'ID da sessão de checkout do Stripe'}
+                }
+            }
+        }
+    ],
+    'responses': {
+        200: {'description': 'Status do checkout'},
+        400: {'description': 'Session ID não fornecido'},
+        404: {'description': 'Sessão não encontrada'}
+    }
+})
+def verify_checkout():
+    """Verificar se checkout foi completado e atualizar assinatura"""
+    try:
+        user_id = int(get_jwt_identity())
+        data = request.json
+        session_id = data.get('session_id') if data else None
+
+        if not session_id:
+            return jsonify({'error': 'session_id é obrigatório'}), 400
+
+        # Buscar sessão no Stripe
+        try:
+            checkout_session = stripe.checkout.Session.retrieve(session_id)
+        except stripe.StripeError as e:
+            return jsonify({'error': f'Sessão não encontrada: {str(e)}'}), 404
+
+        # Verificar se o checkout foi completado
+        if checkout_session.status != 'complete':
+            return jsonify({
+                'success': False,
+                'status': checkout_session.status,
+                'message': 'Checkout não foi completado'
+            }), 200
+
+        # Buscar assinatura do usuário
+        subscription = Subscription.query.filter_by(user_id=user_id).first()
+
+        if not subscription:
+            return jsonify({'error': 'Assinatura não encontrada'}), 404
+
+        # Se já está ativa, retornar sucesso
+        if subscription.status in ['active', 'trialing']:
+            return jsonify({
+                'success': True,
+                'status': subscription.status,
+                'subscription': subscription.to_dict()
+            }), 200
+
+        # Atualizar com dados do checkout
+        stripe_subscription_id = checkout_session.subscription
+        stripe_customer_id = checkout_session.customer
+
+        if stripe_subscription_id:
+            # Buscar dados da assinatura no Stripe
+            stripe_sub = stripe.Subscription.retrieve(stripe_subscription_id)
+            trial_end = datetime.fromtimestamp(stripe_sub.trial_end) if stripe_sub.trial_end else None
+
+            subscription.stripe_subscription_id = stripe_subscription_id
+            subscription.stripe_customer_id = stripe_customer_id
+            subscription.status = stripe_sub.status
+            subscription.start_date = datetime.utcnow()
+            subscription.trial_end = trial_end
+            db.session.commit()
+
+            return jsonify({
+                'success': True,
+                'status': stripe_sub.status,
+                'message': 'Assinatura ativada com sucesso!',
+                'subscription': subscription.to_dict()
+            }), 200
+
+        return jsonify({
+            'success': False,
+            'message': 'Checkout completado mas sem assinatura associada'
+        }), 200
+
+    except Exception as e:
+        return jsonify({'error': f'Erro ao verificar checkout: {str(e)}'}), 500
+
+
+@subscriptions_bp.route('/retry-checkout', methods=['POST'])
+@jwt_required()
+@swag_from({
+    'tags': ['Assinaturas'],
+    'summary': 'Retentar checkout',
+    'description': 'Cria novo checkout para assinatura pendente',
+    'security': [{'Bearer': []}],
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'success_url': {'type': 'string'},
+                    'cancel_url': {'type': 'string'}
+                }
+            }
+        }
+    ],
+    'responses': {
+        200: {'description': 'Novo checkout criado'},
+        400: {'description': 'Não há assinatura pendente'},
+        404: {'description': 'Assinatura não encontrada'}
+    }
+})
+def retry_checkout():
+    """Criar novo checkout para assinatura pendente"""
+    try:
+        user_id = int(get_jwt_identity())
+        data = request.json or {}
+        success_url = data.get('success_url', 'http://localhost:3000/subscription/success')
+        cancel_url = data.get('cancel_url', 'http://localhost:3000/subscription/cancel')
+
+        # Buscar assinatura pendente
+        subscription = Subscription.query.filter_by(user_id=user_id).first()
+
+        if not subscription:
+            return jsonify({'error': 'Assinatura não encontrada'}), 404
+
+        if subscription.status in ['active', 'trialing']:
+            return jsonify({'error': 'Assinatura já está ativa'}), 400
+
+        # Buscar usuário
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'Usuário não encontrado'}), 404
+
+        plan = subscription.plan or 'basic'
+
+        # Criar ou recuperar customer no Stripe
+        stripe_customer_id = subscription.stripe_customer_id
+        if not stripe_customer_id:
+            customer = stripe.Customer.create(
+                email=user.email,
+                name=user.name,
+                metadata={'user_id': str(user_id)}
+            )
+            stripe_customer_id = customer.id
+
+        # Criar nova Checkout Session
+        checkout_session = stripe.checkout.Session.create(
+            customer=stripe_customer_id,
+            payment_method_types=['card'],
+            mode='subscription',
+            line_items=[{
+                'price': PLANS[plan]['price_id'],
+                'quantity': 1
+            }],
+            subscription_data={
+                'trial_period_days': 7,
+                'metadata': {
+                    'user_id': str(user_id),
+                    'plan': plan
+                }
+            },
+            success_url=success_url + '?session_id={CHECKOUT_SESSION_ID}',
+            cancel_url=cancel_url,
+            metadata={
+                'user_id': str(user_id),
+                'plan': plan
+            }
+        )
+
+        # Atualizar customer_id se necessário
+        subscription.stripe_customer_id = stripe_customer_id
+        db.session.commit()
+
+        return jsonify({
+            'checkout_url': checkout_session.url,
+            'session_id': checkout_session.id
+        }), 200
+
+    except stripe.StripeError as e:
+        return jsonify({'error': f'Erro no Stripe: {str(e)}'}), 400
+    except Exception as e:
+        return jsonify({'error': f'Erro ao criar checkout: {str(e)}'}), 500
+
+
 @subscriptions_bp.route('/webhook', methods=['POST'])
 @swag_from({
     'tags': ['Assinaturas'],

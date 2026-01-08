@@ -8,8 +8,9 @@ professional_services = db.Table('professional_services',
 
 class Professional(db.Model):
     __tablename__ = 'professionals'
-    
+
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)  # Empresa dona do profissional
     name = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(255), nullable=False)
     phone = db.Column(db.String(20))
@@ -18,7 +19,9 @@ class Professional(db.Model):
     active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
+    # Relacionamentos
+    user = db.relationship('User', backref=db.backref('professionals', lazy=True))
     services = db.relationship('Service', secondary=professional_services, lazy='subquery',
                               backref=db.backref('professionals', lazy=True))
     appointments = db.relationship('Appointment', backref='professional', lazy=True)

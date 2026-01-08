@@ -3,8 +3,9 @@ from datetime import datetime
 
 class Service(db.Model):
     __tablename__ = 'services'
-    
+
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)  # Empresa dona do serviço
     name = db.Column(db.String(255), nullable=False)
     description = db.Column(db.Text)
     price = db.Column(db.Numeric(10, 2), nullable=False)
@@ -13,7 +14,9 @@ class Service(db.Model):
     active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
+    # Relacionamentos
+    user = db.relationship('User', backref=db.backref('services', lazy=True))
     appointments = db.relationship('Appointment', backref='service', lazy=True)
     
     def to_dict(self):
