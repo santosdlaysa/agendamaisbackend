@@ -23,7 +23,7 @@ auth_bp = Blueprint('auth', __name__)
                     'email': {'type': 'string', 'example': 'usuario@email.com'},
                     'password': {'type': 'string', 'example': 'senha123'},
                     'name': {'type': 'string', 'example': 'João Silva'},
-                    'role': {'type': 'string', 'example': 'admin', 'default': 'admin'}
+                    'role': {'type': 'string', 'example': 'user', 'default': 'user'}
                 }
             }
         }
@@ -56,11 +56,11 @@ def register():
         if existing_user:
             return jsonify(message='Email já está em uso'), 400
         
-        # Criar novo usuário
+        # Criar novo usuário (role sempre 'user' - admins devem ser promovidos manualmente)
         user = User(
             email=data['email'],
             name=data['name'],
-            role=data.get('role', 'admin')
+            role='user'
         )
         user.set_password(data['password'])
 
