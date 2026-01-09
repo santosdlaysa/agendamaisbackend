@@ -151,14 +151,18 @@ def create_subscription():
         success_url = data.get('success_url', 'http://localhost:3000/subscription/success')
         cancel_url = data.get('cancel_url', 'http://localhost:3000/subscription/cancel')
 
-        # Validar plano
-        if not plan or plan not in PLANS:
-            return jsonify({'error': f'Plano inválido. Recebido: {plan}. Válidos: {list(PLANS.keys())}'}), 400
-
         # Buscar usuário
         user = User.query.get(user_id)
         if not user:
             return jsonify({'error': 'Usuário não encontrado'}), 404
+
+        # Admins não precisam de assinatura
+        if user.role == 'admin':
+            return jsonify({'error': 'Administradores não precisam de assinatura'}), 400
+
+        # Validar plano
+        if not plan or plan not in PLANS:
+            return jsonify({'error': f'Plano inválido. Recebido: {plan}. Válidos: {list(PLANS.keys())}'}), 400
 
         # Verificar se já tem assinatura ativa
         existing = Subscription.query.filter_by(user_id=user_id).first()
@@ -258,6 +262,20 @@ def get_subscription_status():
     """Obter status da assinatura do usuário"""
     try:
         user_id = int(get_jwt_identity())
+
+        # Verificar se é admin - admins não precisam de assinatura
+        user = User.query.get(user_id)
+        if user and user.role == 'admin':
+            return jsonify({
+                'has_subscription': True,
+                'is_admin': True,
+                'subscription': {
+                    'plan': 'admin',
+                    'status': 'active',
+                    'is_admin_access': True,
+                    'message': 'Acesso administrativo - sem necessidade de assinatura'
+                }
+            }), 200
 
         subscription = Subscription.query.filter_by(user_id=user_id).first()
 

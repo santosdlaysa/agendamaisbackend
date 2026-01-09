@@ -2,11 +2,13 @@ from functools import wraps
 from flask import jsonify
 from flask_jwt_extended import get_jwt_identity
 from src.models.subscription import Subscription
+from src.models.user import User
 
 
 def subscription_required(plans=None):
     """
-    Decorator para verificar se o cliente tem uma assinatura ativa.
+    Decorator para verificar se o usuário tem uma assinatura ativa.
+    Admins são isentos de verificação de assinatura.
 
     Args:
         plans: Lista de planos que têm permissão para acessar o recurso.
@@ -27,10 +29,15 @@ def subscription_required(plans=None):
         @wraps(fn)
         def wrapper(*args, **kwargs):
             try:
-                client_id = get_jwt_identity()
+                user_id = get_jwt_identity()
 
-                # Buscar assinatura do cliente
-                subscription = Subscription.query.filter_by(client_id=client_id).first()
+                # Verificar se é admin - admins não precisam de assinatura
+                user = User.query.get(user_id)
+                if user and user.role == 'admin':
+                    return fn(*args, **kwargs)
+
+                # Buscar assinatura do usuário
+                subscription = Subscription.query.filter_by(user_id=user_id).first()
 
                 # Verificar se tem assinatura
                 if not subscription:
