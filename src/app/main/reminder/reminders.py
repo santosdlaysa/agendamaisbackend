@@ -11,6 +11,7 @@ from src.services.twilio_service import (
     send_whatsapp, send_sms, is_twilio_configured,
     create_appointment_reminder_message
 )
+import os
 from src.services.email_service import send_email
 
 reminders_bp = Blueprint('reminders', __name__)
@@ -631,6 +632,162 @@ def scheduler_status():
 
     except Exception as e:
         return jsonify(message=f'Erro ao verificar status: {str(e)}'), 500
+
+
+# ============================================
+# TESTES DE CONEXÃO
+# ============================================
+
+@reminders_bp.route('/test/whatsapp', methods=['POST'])
+@jwt_required()
+@swag_from({
+    'tags': ['Lembretes'],
+    'summary': 'Testar envio de WhatsApp',
+    'description': 'Envia uma mensagem de teste via WhatsApp para validar a configuração do Twilio',
+    'security': [{'Bearer': []}],
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'phone': {'type': 'string', 'description': 'Número de telefone (opcional, usa TEST_WHATSAPP_NUMBER se não informado)'}
+                }
+            }
+        }
+    ],
+    'responses': {
+        200: {'description': 'Mensagem enviada com sucesso'},
+        400: {'description': 'Erro ao enviar mensagem'},
+        500: {'description': 'Erro interno'}
+    }
+})
+def test_whatsapp():
+    """Testar envio de WhatsApp"""
+    try:
+        # Verificar se Twilio está configurado
+        if not is_twilio_configured():
+            return jsonify({
+                'success': False,
+                'message': 'Twilio não configurado. Configure TWILIO_ACCOUNT_SID e TWILIO_AUTH_TOKEN.'
+            }), 400
+
+        data = request.get_json() or {}
+
+        # Usar número de teste ou o fornecido
+        test_phone = data.get('phone') or os.getenv('TEST_WHATSAPP_NUMBER')
+
+        if not test_phone:
+            return jsonify({
+                'success': False,
+                'message': 'Nenhum número de telefone fornecido. Envie {"phone": "+5511999999999"} ou configure TEST_WHATSAPP_NUMBER.'
+            }), 400
+
+        # Mensagem de teste
+        test_message = """🧪 *Teste de Conexão - Agenda+*
+
+Esta é uma mensagem de teste para validar a configuração do WhatsApp.
+
+Se você recebeu esta mensagem, a integração está funcionando corretamente! ✅
+
+_Mensagem enviada automaticamente pelo sistema._"""
+
+        # Enviar mensagem
+        success, result = send_whatsapp(test_phone, test_message)
+
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'Mensagem de teste enviada com sucesso!',
+                'message_sid': result,
+                'phone': test_phone
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'message': f'Falha ao enviar mensagem: {result}',
+                'phone': test_phone
+            }), 400
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Erro interno: {str(e)}'
+        }), 500
+
+
+@reminders_bp.route('/test/sms', methods=['POST'])
+@jwt_required()
+@swag_from({
+    'tags': ['Lembretes'],
+    'summary': 'Testar envio de SMS',
+    'description': 'Envia uma mensagem de teste via SMS para validar a configuração do Twilio',
+    'security': [{'Bearer': []}],
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'phone': {'type': 'string', 'description': 'Número de telefone (opcional, usa TEST_SMS_NUMBER se não informado)'}
+                }
+            }
+        }
+    ],
+    'responses': {
+        200: {'description': 'Mensagem enviada com sucesso'},
+        400: {'description': 'Erro ao enviar mensagem'},
+        500: {'description': 'Erro interno'}
+    }
+})
+def test_sms():
+    """Testar envio de SMS"""
+    try:
+        # Verificar se Twilio está configurado
+        if not is_twilio_configured():
+            return jsonify({
+                'success': False,
+                'message': 'Twilio não configurado. Configure TWILIO_ACCOUNT_SID e TWILIO_AUTH_TOKEN.'
+            }), 400
+
+        data = request.get_json() or {}
+
+        # Usar número de teste ou o fornecido
+        test_phone = data.get('phone') or os.getenv('TEST_SMS_NUMBER')
+
+        if not test_phone:
+            return jsonify({
+                'success': False,
+                'message': 'Nenhum número de telefone fornecido. Envie {"phone": "+5511999999999"} ou configure TEST_SMS_NUMBER.'
+            }), 400
+
+        # Mensagem de teste
+        test_message = "Agenda+ Teste: Esta e uma mensagem de teste. Se voce recebeu, a integracao SMS esta funcionando!"
+
+        # Enviar mensagem
+        success, result = send_sms(test_phone, test_message)
+
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'SMS de teste enviado com sucesso!',
+                'message_sid': result,
+                'phone': test_phone
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'message': f'Falha ao enviar SMS: {result}',
+                'phone': test_phone
+            }), 400
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Erro interno: {str(e)}'
+        }), 500
 
 
 # ============================================
