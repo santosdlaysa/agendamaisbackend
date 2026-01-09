@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required
+from flask_jwt_extended import jwt_required, get_jwt_identity
 from flasgger import swag_from
 from src.models.user import db
 from src.models.appointment import Appointment
@@ -17,8 +17,14 @@ except ImportError:
 
 appointments_bp = Blueprint('appointments', __name__)
 
+
+def get_current_user_id():
+    """Obtém o ID do usuário logado"""
+    return int(get_jwt_identity())
+
+
 @appointments_bp.route('', methods=['GET'])
-# @jwt_required()  # Temporariamente desabilitado
+@jwt_required()
 @swag_from({
     'tags': ['Agendamentos'],
     'summary': 'Listar agendamentos',
@@ -49,6 +55,8 @@ appointments_bp = Blueprint('appointments', __name__)
 def get_appointments():
     """Listar agendamentos com filtros"""
     try:
+        user_id = get_current_user_id()
+
         # Parâmetros de filtro
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
@@ -58,9 +66,9 @@ def get_appointments():
         status = request.args.get('status')
         page = int(request.args.get('page', 1))
         per_page = int(request.args.get('per_page', 50))
-        
-        # Query base
-        query = Appointment.query
+
+        # Query base - FILTRAR POR EMPRESA
+        query = Appointment.query.filter_by(user_id=user_id)
         
         # Aplicar filtros
         if start_date:
@@ -116,7 +124,7 @@ def get_appointments():
         return jsonify(message=f'Erro ao listar agendamentos: {str(e)}'), 500
 
 @appointments_bp.route('/<int:appointment_id>', methods=['GET'])
-# @jwt_required()  # Temporariamente desabilitado
+@jwt_required()
 @swag_from({
     'tags': ['Agendamentos'],
     'summary': 'Obter agendamento específico',
@@ -131,18 +139,19 @@ def get_appointments():
 def get_appointment(appointment_id):
     """Obter agendamento específico"""
     try:
-        appointment = Appointment.query.get(appointment_id)
-        
+        user_id = get_current_user_id()
+        appointment = Appointment.query.filter_by(id=appointment_id, user_id=user_id).first()
+
         if not appointment:
             return jsonify(message='Agendamento não encontrado'), 404
-        
+
         return jsonify(appointment=appointment.to_dict_detailed()), 200
-        
+
     except Exception as e:
         return jsonify(message=f'Erro ao obter agendamento: {str(e)}'), 500
 
 @appointments_bp.route('', methods=['POST'])
-# @jwt_required()  # Temporariamente desabilitado
+@jwt_required()
 @swag_from({
     'tags': ['Agendamentos'],
     'summary': 'Criar novo agendamento',
@@ -177,36 +186,37 @@ def get_appointment(appointment_id):
 def create_appointment():
     """Criar novo agendamento"""
     try:
+        user_id = get_current_user_id()
         data = request.get_json()
-        
+
         # Validar dados obrigatórios
         required_fields = ['client_id', 'professional_id', 'service_id', 'appointment_date', 'start_time']
         for field in required_fields:
             if not data.get(field):
                 return jsonify(message=f'{field} é obrigatório'), 400
-        
+
         # Validar e converter data
         try:
             appointment_date = datetime.strptime(data['appointment_date'], '%Y-%m-%d').date()
         except ValueError:
             return jsonify(message='Formato de data inválido. Use YYYY-MM-DD'), 400
-        
+
         # Validar e converter horário
         try:
             start_time = datetime.strptime(data['start_time'], '%H:%M').time()
         except ValueError:
             return jsonify(message='Formato de horário inválido. Use HH:MM'), 400
-        
-        # Verificar se entidades existem
-        client = Client.query.get(data['client_id'])
+
+        # Verificar se entidades existem E PERTENCEM AO USUÁRIO
+        client = Client.query.filter_by(id=data['client_id'], user_id=user_id).first()
         if not client:
             return jsonify(message='Cliente não encontrado'), 404
-        
-        professional = Professional.query.get(data['professional_id'])
+
+        professional = Professional.query.filter_by(id=data['professional_id'], user_id=user_id).first()
         if not professional or not professional.active:
             return jsonify(message='Profissional não encontrado ou inativo'), 404
-        
-        service = Service.query.get(data['service_id'])
+
+        service = Service.query.filter_by(id=data['service_id'], user_id=user_id).first()
         if not service or not service.active:
             return jsonify(message='Serviço não encontrado ou inativo'), 404
         
@@ -225,6 +235,7 @@ def create_appointment():
         
         # Criar agendamento
         appointment = Appointment(
+            user_id=user_id,
             client_id=client.id,
             professional_id=professional.id,
             service_id=service.id,
@@ -266,7 +277,7 @@ def create_appointment():
         return jsonify(message=f'Erro ao criar agendamento: {str(e)}'), 500
 
 @appointments_bp.route('/<int:appointment_id>', methods=['PUT'])
-# @jwt_required()  # Temporariamente desabilitado
+@jwt_required()
 @swag_from({
     'tags': ['Agendamentos'],
     'summary': 'Atualizar agendamento (reagendar)',
@@ -302,41 +313,42 @@ def create_appointment():
 def update_appointment(appointment_id):
     """Atualizar agendamento (reagendar)"""
     try:
-        appointment = Appointment.query.get(appointment_id)
-        
+        user_id = get_current_user_id()
+        appointment = Appointment.query.filter_by(id=appointment_id, user_id=user_id).first()
+
         if not appointment:
             return jsonify(message='Agendamento não encontrado'), 404
-        
+
         data = request.get_json()
-        
+
         # Validar dados obrigatórios
         required_fields = ['client_id', 'professional_id', 'service_id', 'appointment_date', 'start_time']
         for field in required_fields:
             if not data.get(field):
                 return jsonify(message=f'{field} é obrigatório'), 400
-        
+
         # Validar e converter data
         try:
             appointment_date = datetime.strptime(data['appointment_date'], '%Y-%m-%d').date()
         except ValueError:
             return jsonify(message='Formato de data inválido. Use YYYY-MM-DD'), 400
-        
+
         # Validar e converter horário
         try:
             start_time = datetime.strptime(data['start_time'], '%H:%M').time()
         except ValueError:
             return jsonify(message='Formato de horário inválido. Use HH:MM'), 400
-        
-        # Verificar se entidades existem
-        client = Client.query.get(data['client_id'])
+
+        # Verificar se entidades existem E PERTENCEM AO USUÁRIO
+        client = Client.query.filter_by(id=data['client_id'], user_id=user_id).first()
         if not client:
             return jsonify(message='Cliente não encontrado'), 404
-        
-        professional = Professional.query.get(data['professional_id'])
+
+        professional = Professional.query.filter_by(id=data['professional_id'], user_id=user_id).first()
         if not professional or not professional.active:
             return jsonify(message='Profissional não encontrado ou inativo'), 404
-        
-        service = Service.query.get(data['service_id'])
+
+        service = Service.query.filter_by(id=data['service_id'], user_id=user_id).first()
         if not service or not service.active:
             return jsonify(message='Serviço não encontrado ou inativo'), 404
         
@@ -377,7 +389,7 @@ def update_appointment(appointment_id):
         return jsonify(message=f'Erro ao atualizar agendamento: {str(e)}'), 500
 
 @appointments_bp.route('/<int:appointment_id>', methods=['DELETE'])
-# @jwt_required()  # Temporariamente desabilitado
+@jwt_required()
 @swag_from({
     'tags': ['Agendamentos'],
     'summary': 'Excluir agendamento',
@@ -392,7 +404,8 @@ def update_appointment(appointment_id):
 def delete_appointment(appointment_id):
     """Excluir agendamento"""
     try:
-        appointment = Appointment.query.get(appointment_id)
+        user_id = get_current_user_id()
+        appointment = Appointment.query.filter_by(id=appointment_id, user_id=user_id).first()
 
         if not appointment:
             return jsonify(message='Agendamento não encontrado'), 404
@@ -429,7 +442,7 @@ def delete_appointment(appointment_id):
         return jsonify(message=f'Erro ao excluir agendamento: {str(e)}'), 500
 
 @appointments_bp.route('/<int:appointment_id>/status', methods=['PUT'])
-# @jwt_required()  # Temporariamente desabilitado
+@jwt_required()
 @swag_from({
     'tags': ['Agendamentos'],
     'summary': 'Atualizar status do agendamento',
@@ -460,8 +473,9 @@ def delete_appointment(appointment_id):
 def update_appointment_status(appointment_id):
     """Atualizar status do agendamento"""
     try:
-        appointment = Appointment.query.get(appointment_id)
-        
+        user_id = get_current_user_id()
+        appointment = Appointment.query.filter_by(id=appointment_id, user_id=user_id).first()
+
         if not appointment:
             return jsonify(message='Agendamento não encontrado'), 404
         
@@ -512,7 +526,7 @@ def update_appointment_status(appointment_id):
         return jsonify(message=f'Erro ao atualizar status do agendamento: {str(e)}'), 500
 
 @appointments_bp.route('/<int:appointment_id>/complete', methods=['PUT'])
-# @jwt_required()  # Temporariamente desabilitado
+@jwt_required()
 @swag_from({
     'tags': ['Agendamentos'],
     'summary': 'Concluir agendamento',
@@ -541,8 +555,9 @@ def update_appointment_status(appointment_id):
 def complete_appointment(appointment_id):
     """Marcar agendamento como concluído com cálculo automático de valores"""
     try:
-        appointment = Appointment.query.get(appointment_id)
-        
+        user_id = get_current_user_id()
+        appointment = Appointment.query.filter_by(id=appointment_id, user_id=user_id).first()
+
         if not appointment:
             return jsonify(message='Agendamento não encontrado'), 404
         
@@ -602,7 +617,7 @@ def complete_appointment(appointment_id):
         return jsonify(message=f'Erro ao concluir agendamento: {str(e)}'), 500
 
 @appointments_bp.route('/calendar', methods=['GET'])
-# @jwt_required()  # Temporariamente desabilitado
+@jwt_required()
 @swag_from({
     'tags': ['Agendamentos'],
     'summary': 'Obter agendamentos para calendário',
@@ -620,29 +635,32 @@ def complete_appointment(appointment_id):
 def get_calendar_appointments():
     """Obter agendamentos para visualização em calendário"""
     try:
+        user_id = get_current_user_id()
+
         # Parâmetros obrigatórios
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
-        
+
         if not start_date or not end_date:
             return jsonify(message='start_date e end_date são obrigatórios'), 400
-        
+
         # Validar datas
         try:
             start_date_obj = datetime.strptime(start_date, '%Y-%m-%d').date()
             end_date_obj = datetime.strptime(end_date, '%Y-%m-%d').date()
         except ValueError:
             return jsonify(message='Formato de data inválido. Use YYYY-MM-DD'), 400
-        
+
         # Filtros opcionais
         professional_id = request.args.get('professional_id')
-        
-        # Query
+
+        # Query - FILTRAR POR EMPRESA
         query = Appointment.query.filter(
+            Appointment.user_id == user_id,
             Appointment.appointment_date >= start_date_obj,
             Appointment.appointment_date <= end_date_obj
         )
-        
+
         if professional_id:
             query = query.filter(Appointment.professional_id == professional_id)
         
@@ -674,7 +692,7 @@ def get_calendar_appointments():
         return jsonify(message=f'Erro ao obter agendamentos do calendário: {str(e)}'), 500
 
 @appointments_bp.route('/check-availability', methods=['POST'])
-# @jwt_required()  # Temporariamente desabilitado
+@jwt_required()
 @swag_from({
     'tags': ['Agendamentos'],
     'summary': 'Verificar disponibilidade de horário',
@@ -712,28 +730,29 @@ def get_calendar_appointments():
 def check_availability():
     """Verificar disponibilidade de horário"""
     try:
+        user_id = get_current_user_id()
         data = request.get_json()
-        
+
         # Validar dados obrigatórios
         required_fields = ['professional_id', 'service_id', 'appointment_date', 'start_time']
         for field in required_fields:
             if not data.get(field):
                 return jsonify(message=f'{field} é obrigatório'), 400
-        
+
         # Validar e converter data
         try:
             appointment_date = datetime.strptime(data['appointment_date'], '%Y-%m-%d').date()
         except ValueError:
             return jsonify(message='Formato de data inválido. Use YYYY-MM-DD'), 400
-        
+
         # Validar e converter horário
         try:
             start_time = datetime.strptime(data['start_time'], '%H:%M').time()
         except ValueError:
             return jsonify(message='Formato de horário inválido. Use HH:MM'), 400
-        
-        # Buscar serviço para obter duração
-        service = Service.query.get(data['service_id'])
+
+        # Buscar serviço para obter duração - VERIFICAR SE PERTENCE AO USUÁRIO
+        service = Service.query.filter_by(id=data['service_id'], user_id=user_id).first()
         if not service:
             return jsonify(message='Serviço não encontrado'), 404
         
@@ -761,7 +780,7 @@ def check_availability():
         return jsonify(message=f'Erro ao verificar disponibilidade: {str(e)}'), 500
 
 @appointments_bp.route('/financial-report', methods=['GET'])
-# @jwt_required()  # Temporariamente desabilitado
+@jwt_required()
 @swag_from({
     'tags': ['Agendamentos'],
     'summary': 'Relatório financeiro',
@@ -797,14 +816,19 @@ def check_availability():
 def get_financial_report():
     """Obter relatório financeiro dos agendamentos concluídos"""
     try:
+        user_id = get_current_user_id()
+
         # Parâmetros de filtro
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
         professional_id = request.args.get('professional_id')
         service_id = request.args.get('service_id')
-        
-        # Query base para agendamentos concluídos
-        query = Appointment.query.filter(Appointment.status == 'completed')
+
+        # Query base para agendamentos concluídos - FILTRAR POR EMPRESA
+        query = Appointment.query.filter(
+            Appointment.user_id == user_id,
+            Appointment.status == 'completed'
+        )
         
         # Aplicar filtros de data
         if start_date:

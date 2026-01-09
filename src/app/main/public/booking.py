@@ -667,13 +667,18 @@ def create_appointment(slug):
     if Appointment.check_conflict(data['professional_id'], appointment_date, start_time, end_time):
         return jsonify({'error': 'Horário não disponível'}), 400
 
-    # Buscar ou criar cliente
-    client = Client.query.filter_by(phone=client_data['phone']).first()
+    # Buscar ou criar cliente (associado ao estabelecimento)
+    client = Client.query.filter_by(
+        phone=client_data['phone'],
+        user_id=user.id
+    ).first()
+
     if not client:
         client = Client(
             name=client_data['name'],
             phone=client_data['phone'],
-            email=client_data.get('email')
+            email=client_data.get('email'),
+            user_id=user.id
         )
         db.session.add(client)
         db.session.flush()
@@ -681,6 +686,9 @@ def create_appointment(slug):
         # Atualizar dados do cliente se necessário
         if client_data.get('email') and not client.email:
             client.email = client_data.get('email')
+        # Atualizar nome se mudou
+        if client_data.get('name') and client.name != client_data['name']:
+            client.name = client_data['name']
 
     # Gerar código único de agendamento
     booking_code = generate_booking_code()
@@ -830,10 +838,19 @@ def cancel_appointment(code):
 
     # Verificar antecedência mínima para cancelamento
     appointment_datetime = datetime.combine(appointment.appointment_date, appointment.start_time)
+    now = datetime.now()
     min_hours = user.booking_cancellation_min_hours if user else 2
-    if appointment_datetime - datetime.now() < timedelta(hours=min_hours):
+    time_until_appointment = appointment_datetime - now
+
+    if time_until_appointment < timedelta(hours=min_hours):
         return jsonify({
-            'error': f'Não é possível cancelar com menos de {min_hours} horas de antecedência'
+            'error': f'Não é possível cancelar com menos de {min_hours} horas de antecedência',
+            'details': {
+                'appointment_datetime': appointment_datetime.isoformat(),
+                'current_datetime': now.isoformat(),
+                'hours_until_appointment': time_until_appointment.total_seconds() / 3600,
+                'min_hours_required': min_hours
+            }
         }), 400
 
     appointment.status = 'cancelled'
