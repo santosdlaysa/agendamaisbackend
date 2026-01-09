@@ -9,7 +9,7 @@ from .working_hours import WorkingHours, ProfessionalBlockedDate
 # Import reminder models after appointment to avoid circular dependency
 try:
     from .reminder import Reminder
-    from .reminder_settings import ReminderSettings
+    from .reminder_settings import ReminderSettings, ProfessionalReminderSettings
 except ImportError as e:
     print(f"Warning: Could not import reminder models: {e}")
     pass

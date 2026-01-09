@@ -4,7 +4,7 @@ from flasgger import swag_from
 from datetime import datetime, timedelta
 from src.config.database import db
 from src.models.reminder import Reminder, ReminderLog
-from src.models.reminder_settings import ReminderSettings
+from src.models.reminder_settings import ReminderSettings, ProfessionalReminderSettings
 from src.models.appointment import Appointment
 from src.models.user import User
 from src.services.twilio_service import (
@@ -120,6 +120,144 @@ def update_settings():
         return jsonify({
             'message': 'Configurações atualizadas com sucesso',
             'settings': settings.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify(message=f'Erro ao atualizar configurações: {str(e)}'), 500
+
+
+# ============================================
+# CONFIGURAÇÕES POR PROFISSIONAL
+# ============================================
+
+@reminders_bp.route('/settings/professional/<int:professional_id>', methods=['GET'])
+@jwt_required()
+@swag_from({
+    'tags': ['Lembretes'],
+    'summary': 'Obter configurações de lembretes por profissional',
+    'security': [{'Bearer': []}],
+    'parameters': [
+        {'name': 'professional_id', 'in': 'path', 'type': 'integer', 'required': True}
+    ],
+    'responses': {
+        200: {'description': 'Configurações do profissional'}
+    }
+})
+def get_professional_settings(professional_id):
+    """Obter configurações de lembretes de um profissional específico"""
+    try:
+        user_id = get_current_user_id()
+
+        settings = ProfessionalReminderSettings.query.filter_by(
+            user_id=user_id,
+            professional_id=professional_id
+        ).all()
+
+        # Formatar no padrão esperado pelo frontend
+        settings_list = [s.to_dict() for s in settings]
+
+        return jsonify({
+            'professional_id': professional_id,
+            'settings': settings_list,
+            'twilio_configured': is_twilio_configured()
+        }), 200
+
+    except Exception as e:
+        return jsonify(message=f'Erro ao obter configurações: {str(e)}'), 500
+
+
+@reminders_bp.route('/settings/professional', methods=['PUT'])
+@jwt_required()
+@swag_from({
+    'tags': ['Lembretes'],
+    'summary': 'Atualizar configurações de lembretes por profissional',
+    'security': [{'Bearer': []}],
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'schema': {
+                'type': 'object',
+                'required': ['professional_id', 'settings'],
+                'properties': {
+                    'professional_id': {'type': 'integer'},
+                    'settings': {
+                        'type': 'array',
+                        'items': {
+                            'type': 'object',
+                            'properties': {
+                                'reminder_type': {'type': 'string', 'enum': ['whatsapp', 'sms', 'email']},
+                                'enabled': {'type': 'boolean'},
+                                'hours_before': {'type': 'integer'},
+                                'custom_message': {'type': 'string'}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    ],
+    'responses': {
+        200: {'description': 'Configurações atualizadas'},
+        400: {'description': 'Dados inválidos'}
+    }
+})
+def update_professional_settings():
+    """Atualizar configurações de lembretes por profissional"""
+    try:
+        user_id = get_current_user_id()
+        data = request.get_json()
+
+        professional_id = data.get('professional_id')
+        settings_data = data.get('settings', [])
+
+        if not professional_id:
+            return jsonify(message='professional_id é obrigatório'), 400
+
+        if not settings_data:
+            return jsonify(message='settings é obrigatório'), 400
+
+        updated_settings = []
+
+        for setting_item in settings_data:
+            reminder_type = setting_item.get('reminder_type')
+
+            if not reminder_type or reminder_type not in ['whatsapp', 'sms', 'email']:
+                continue
+
+            # Buscar configuração existente ou criar nova
+            setting = ProfessionalReminderSettings.query.filter_by(
+                professional_id=professional_id,
+                reminder_type=reminder_type
+            ).first()
+
+            if not setting:
+                setting = ProfessionalReminderSettings(
+                    user_id=user_id,
+                    professional_id=professional_id,
+                    reminder_type=reminder_type
+                )
+                db.session.add(setting)
+
+            # Atualizar campos
+            if 'enabled' in setting_item:
+                setting.enabled = setting_item['enabled']
+
+            if 'hours_before' in setting_item:
+                setting.hours_before = max(1, min(72, int(setting_item['hours_before'])))
+
+            if 'custom_message' in setting_item:
+                setting.custom_message = setting_item['custom_message']
+
+            updated_settings.append(setting)
+
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Configurações atualizadas com sucesso',
+            'professional_id': professional_id,
+            'settings': [s.to_dict() for s in updated_settings]
         }), 200
 
     except Exception as e:
