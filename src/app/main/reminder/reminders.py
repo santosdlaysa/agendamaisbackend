@@ -673,7 +673,7 @@ def test_whatsapp():
                 'message': 'Twilio não configurado. Configure TWILIO_ACCOUNT_SID e TWILIO_AUTH_TOKEN.'
             }), 400
 
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
 
         # Usar número de teste ou o fornecido
         test_phone = data.get('phone') or os.getenv('TEST_WHATSAPP_NUMBER')
@@ -752,7 +752,7 @@ def test_sms():
                 'message': 'Twilio não configurado. Configure TWILIO_ACCOUNT_SID e TWILIO_AUTH_TOKEN.'
             }), 400
 
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
 
         # Usar número de teste ou o fornecido
         test_phone = data.get('phone') or os.getenv('TEST_SMS_NUMBER')
