@@ -12,9 +12,13 @@ from src.services.twilio_service import (
     create_appointment_reminder_message
 )
 import os
+from flask import current_app
 from src.services.email_service import send_email
 
 reminders_bp = Blueprint('reminders', __name__)
+
+# Variável global para armazenar o scheduler
+_scheduler = None
 
 
 def get_current_user_id():
@@ -622,16 +626,179 @@ def scheduler_status():
             Reminder.scheduled_at >= datetime.utcnow()
         ).order_by(Reminder.scheduled_at).first()
 
+        # Verificar se o scheduler está rodando
+        scheduler_running = _scheduler is not None and _scheduler.running
+
         return jsonify({
-            'running': True,
+            'running': scheduler_running,
             'pending_today': pending_today,
             'next_run': next_reminder.scheduled_at.isoformat() if next_reminder else None,
             'twilio_configured': is_twilio_configured(),
-            'message': 'Sistema de lembretes ativo'
+            'message': 'Scheduler em execução' if scheduler_running else 'Scheduler parado'
         }), 200
 
     except Exception as e:
         return jsonify(message=f'Erro ao verificar status: {str(e)}'), 500
+
+
+@reminders_bp.route('/scheduler/start', methods=['POST'])
+@jwt_required()
+@swag_from({
+    'tags': ['Lembretes'],
+    'summary': 'Iniciar agendador de lembretes',
+    'description': 'Inicia o processamento automático de lembretes em background',
+    'security': [{'Bearer': []}],
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'interval_minutes': {'type': 'integer', 'default': 5, 'description': 'Intervalo em minutos entre execuções'}
+                }
+            }
+        }
+    ],
+    'responses': {
+        200: {'description': 'Scheduler iniciado'},
+        400: {'description': 'Scheduler já está rodando'},
+        500: {'description': 'Erro ao iniciar'}
+    }
+})
+def scheduler_start():
+    """Iniciar agendador de lembretes em background"""
+    global _scheduler
+
+    try:
+        # Verificar se já está rodando
+        if _scheduler is not None and _scheduler.running:
+            return jsonify({
+                'success': False,
+                'message': 'Scheduler já está em execução',
+                'running': True
+            }), 400
+
+        data = request.get_json(silent=True) or {}
+        interval_minutes = int(data.get('interval_minutes', 5))
+
+        # Limitar intervalo entre 1 e 60 minutos
+        interval_minutes = max(1, min(60, interval_minutes))
+
+        try:
+            from apscheduler.schedulers.background import BackgroundScheduler
+            from apscheduler.triggers.interval import IntervalTrigger
+            from src.scheduler.reminder_scheduler import run_scheduler
+
+            _scheduler = BackgroundScheduler()
+
+            app = current_app._get_current_object()
+
+            def job():
+                with app.app_context():
+                    run_scheduler()
+
+            _scheduler.add_job(
+                func=job,
+                trigger=IntervalTrigger(minutes=interval_minutes),
+                id='reminder_scheduler',
+                name='Processar lembretes pendentes',
+                replace_existing=True
+            )
+
+            _scheduler.start()
+
+            return jsonify({
+                'success': True,
+                'message': f'Scheduler iniciado com intervalo de {interval_minutes} minutos',
+                'running': True,
+                'interval_minutes': interval_minutes
+            }), 200
+
+        except ImportError:
+            return jsonify({
+                'success': False,
+                'message': 'APScheduler não instalado. Execute: pip install apscheduler'
+            }), 500
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Erro ao iniciar scheduler: {str(e)}'
+        }), 500
+
+
+@reminders_bp.route('/scheduler/stop', methods=['POST'])
+@jwt_required()
+@swag_from({
+    'tags': ['Lembretes'],
+    'summary': 'Parar agendador de lembretes',
+    'description': 'Para o processamento automático de lembretes',
+    'security': [{'Bearer': []}],
+    'responses': {
+        200: {'description': 'Scheduler parado'},
+        400: {'description': 'Scheduler não está rodando'},
+        500: {'description': 'Erro ao parar'}
+    }
+})
+def scheduler_stop():
+    """Parar agendador de lembretes"""
+    global _scheduler
+
+    try:
+        if _scheduler is None or not _scheduler.running:
+            return jsonify({
+                'success': False,
+                'message': 'Scheduler não está em execução',
+                'running': False
+            }), 400
+
+        _scheduler.shutdown(wait=False)
+        _scheduler = None
+
+        return jsonify({
+            'success': True,
+            'message': 'Scheduler parado com sucesso',
+            'running': False
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Erro ao parar scheduler: {str(e)}'
+        }), 500
+
+
+@reminders_bp.route('/scheduler/run-now', methods=['POST'])
+@jwt_required()
+@swag_from({
+    'tags': ['Lembretes'],
+    'summary': 'Executar processamento de lembretes agora',
+    'description': 'Executa o processamento de lembretes imediatamente (uma vez)',
+    'security': [{'Bearer': []}],
+    'responses': {
+        200: {'description': 'Processamento executado'},
+        500: {'description': 'Erro ao executar'}
+    }
+})
+def scheduler_run_now():
+    """Executar processamento de lembretes imediatamente"""
+    try:
+        from src.scheduler.reminder_scheduler import run_scheduler
+
+        results = run_scheduler()
+
+        return jsonify({
+            'success': True,
+            'message': 'Processamento executado com sucesso',
+            'results': results
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Erro ao executar processamento: {str(e)}'
+        }), 500
 
 
 # ============================================
