@@ -95,6 +95,57 @@ def update_settings():
         user_id = get_current_user_id()
         data = request.get_json()
 
+        # NOVO FORMATO: com professional_id e settings[]
+        if 'professional_id' in data and 'settings' in data:
+            professional_id = data.get('professional_id')
+            settings_data = data.get('settings', [])
+
+            if not professional_id:
+                return jsonify(message='professional_id é obrigatório'), 400
+
+            updated_settings = []
+
+            for setting_item in settings_data:
+                reminder_type = setting_item.get('reminder_type')
+
+                if not reminder_type or reminder_type not in ['whatsapp', 'sms', 'email']:
+                    continue
+
+                # Buscar configuração existente ou criar nova
+                setting = ProfessionalReminderSettings.query.filter_by(
+                    professional_id=professional_id,
+                    reminder_type=reminder_type
+                ).first()
+
+                if not setting:
+                    setting = ProfessionalReminderSettings(
+                        user_id=user_id,
+                        professional_id=professional_id,
+                        reminder_type=reminder_type
+                    )
+                    db.session.add(setting)
+
+                # Atualizar campos
+                if 'enabled' in setting_item:
+                    setting.enabled = setting_item['enabled']
+
+                if 'hours_before' in setting_item:
+                    setting.hours_before = max(1, min(72, int(setting_item['hours_before'])))
+
+                if 'custom_message' in setting_item:
+                    setting.custom_message = setting_item['custom_message']
+
+                updated_settings.append(setting)
+
+            db.session.commit()
+
+            return jsonify({
+                'message': 'Configurações atualizadas com sucesso',
+                'professional_id': professional_id,
+                'settings': [s.to_dict() for s in updated_settings]
+            }), 200
+
+        # FORMATO LEGADO: campos flat
         settings = ReminderSettings.query.filter_by(user_id=user_id).first()
 
         if not settings:
