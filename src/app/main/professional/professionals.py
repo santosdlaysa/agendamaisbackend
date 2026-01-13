@@ -317,7 +317,7 @@ def delete_professional(professional_id):
         return jsonify(message=f'Erro ao excluir profissional: {str(e)}'), 500
 
 @professionals_bp.route('/<int:professional_id>/services', methods=['GET'])
-# @jwt_required()  # Temporariamente desabilitado
+@jwt_required()
 @swag_from({
     'tags': ['Profissionais'],
     'summary': 'Obter serviços de um profissional',
@@ -332,20 +332,21 @@ def delete_professional(professional_id):
 def get_professional_services(professional_id):
     """Obter serviços de um profissional"""
     try:
-        professional = Professional.query.get(professional_id)
-        
+        user_id = get_current_user_id()
+        professional = Professional.query.filter_by(id=professional_id, user_id=user_id).first()
+
         if not professional:
             return jsonify(message='Profissional não encontrado'), 404
-        
+
         services_data = [service.to_dict() for service in professional.services if service.active]
-        
+
         return jsonify(services=services_data), 200
-        
+
     except Exception as e:
         return jsonify(message=f'Erro ao obter serviços do profissional: {str(e)}'), 500
 
 @professionals_bp.route('/<int:professional_id>/services', methods=['POST'])
-# @jwt_required()  # Temporariamente desabilitado
+@jwt_required()
 @swag_from({
     'tags': ['Profissionais'],
     'summary': 'Atualizar serviços de um profissional',
@@ -371,32 +372,33 @@ def get_professional_services(professional_id):
 def update_professional_services(professional_id):
     """Atualizar serviços de um profissional"""
     try:
-        professional = Professional.query.get(professional_id)
-        
+        user_id = get_current_user_id()
+        professional = Professional.query.filter_by(id=professional_id, user_id=user_id).first()
+
         if not professional:
             return jsonify(message='Profissional não encontrado'), 404
-        
+
         data = request.get_json()
         service_ids = data.get('service_ids', [])
-        
-        # Buscar serviços
-        services = Service.query.filter(Service.id.in_(service_ids)).all()
-        
+
+        # Buscar serviços (somente da mesma empresa)
+        services = Service.query.filter(Service.id.in_(service_ids), Service.user_id == user_id).all()
+
         # Atualizar associação
         professional.services = services
         db.session.commit()
-        
+
         return jsonify(
             message='Serviços do profissional atualizados com sucesso',
             services=[service.to_dict() for service in services]
         ), 200
-        
+
     except Exception as e:
         db.session.rollback()
         return jsonify(message=f'Erro ao atualizar serviços do profissional: {str(e)}'), 500
 
 @professionals_bp.route('/<int:professional_id>/toggle-status', methods=['POST'])
-# @jwt_required()  # Temporariamente desabilitado
+@jwt_required()
 @swag_from({
     'tags': ['Profissionais'],
     'summary': 'Ativar/desativar profissional',
@@ -412,7 +414,8 @@ def update_professional_services(professional_id):
 def toggle_professional_status(professional_id):
     """Ativar/desativar profissional"""
     try:
-        professional = Professional.query.get(professional_id)
+        user_id = get_current_user_id()
+        professional = Professional.query.filter_by(id=professional_id, user_id=user_id).first()
 
         if not professional:
             return jsonify(message='Profissional não encontrado'), 404

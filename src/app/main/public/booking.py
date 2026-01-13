@@ -103,7 +103,7 @@ def get_services(slug):
     if error:
         return jsonify(error[0]), error[1]
 
-    query = Service.query.filter_by(active=True)
+    query = Service.query.filter_by(active=True, user_id=user.id)
 
     # Filtro por categoria se informado
     category = request.args.get('category')
@@ -156,11 +156,15 @@ def get_professionals(slug):
     service_id = request.args.get('service_id', type=int)
 
     if service_id:
-        professionals = Professional.query.filter_by(active=True).filter(
+        # Verificar se o serviço pertence a esta empresa
+        service = Service.query.filter_by(id=service_id, user_id=user.id, active=True).first()
+        if not service:
+            return jsonify({'error': 'Serviço não encontrado'}), 404
+        professionals = Professional.query.filter_by(active=True, user_id=user.id).filter(
             Professional.services.any(id=service_id)
         ).all()
     else:
-        professionals = Professional.query.filter_by(active=True).all()
+        professionals = Professional.query.filter_by(active=True, user_id=user.id).all()
 
     result = []
     for p in professionals:
@@ -211,7 +215,7 @@ def get_professional_services(slug, professional_id):
     if error:
         return jsonify(error[0]), error[1]
 
-    professional = Professional.query.filter_by(id=professional_id, active=True).first()
+    professional = Professional.query.filter_by(id=professional_id, active=True, user_id=user.id).first()
 
     if not professional:
         return jsonify({'error': 'Profissional não encontrado'}), 404
@@ -256,7 +260,7 @@ def get_professional_working_hours(slug, professional_id):
     if error:
         return jsonify(error[0]), error[1]
 
-    professional = Professional.query.filter_by(id=professional_id, active=True).first()
+    professional = Professional.query.filter_by(id=professional_id, active=True, user_id=user.id).first()
     if not professional:
         return jsonify({'error': 'Profissional não encontrado'}), 404
 
@@ -314,12 +318,12 @@ def get_availability(slug):
     if date > (now + max_advance).date():
         return jsonify({'error': f'Antecedência máxima de {user.booking_max_advance_days} dias'}), 400
 
-    service = Service.query.get(service_id)
+    service = Service.query.filter_by(id=service_id, user_id=user.id, active=True).first()
     if not service:
         return jsonify({'error': 'Serviço não encontrado'}), 404
 
-    professional = Professional.query.get(professional_id)
-    if not professional or not professional.active:
+    professional = Professional.query.filter_by(id=professional_id, user_id=user.id, active=True).first()
+    if not professional:
         return jsonify({'error': 'Profissional não encontrado'}), 404
 
     # Verificar se é data bloqueada
@@ -451,12 +455,12 @@ def get_multi_day_availability(slug):
 
     days = min(days, user.booking_max_advance_days or 30)
 
-    service = Service.query.get(service_id)
+    service = Service.query.filter_by(id=service_id, user_id=user.id, active=True).first()
     if not service:
         return jsonify({'error': 'Serviço não encontrado'}), 404
 
-    professional = Professional.query.get(professional_id)
-    if not professional or not professional.active:
+    professional = Professional.query.filter_by(id=professional_id, user_id=user.id, active=True).first()
+    if not professional:
         return jsonify({'error': 'Profissional não encontrado'}), 404
 
     # Buscar horários de trabalho
@@ -646,13 +650,13 @@ def create_appointment(slug):
     if appointment_date > (now + max_advance).date():
         return jsonify({'error': f'Antecedência máxima de {user.booking_max_advance_days} dias'}), 400
 
-    # Buscar serviço e profissional
-    service = Service.query.get(data['service_id'])
+    # Buscar serviço e profissional (validando pertencimento à empresa)
+    service = Service.query.filter_by(id=data['service_id'], user_id=user.id, active=True).first()
     if not service:
         return jsonify({'error': 'Serviço não encontrado'}), 404
 
-    professional = Professional.query.get(data['professional_id'])
-    if not professional or not professional.active:
+    professional = Professional.query.filter_by(id=data['professional_id'], user_id=user.id, active=True).first()
+    if not professional:
         return jsonify({'error': 'Profissional não encontrado'}), 404
 
     # Verificar se é data bloqueada
@@ -740,7 +744,8 @@ def create_appointment(slug):
     'summary': 'Consultar agendamento',
     'description': 'Consulta detalhes de um agendamento pelo código ou telefone do cliente',
     'parameters': [
-        {'name': 'code', 'in': 'path', 'type': 'string', 'required': True, 'description': 'Código do agendamento ou telefone do cliente'}
+        {'name': 'code', 'in': 'path', 'type': 'string', 'required': True, 'description': 'Código do agendamento ou telefone do cliente'},
+        {'name': 'business_slug', 'in': 'query', 'type': 'string', 'required': False, 'description': 'Slug do estabelecimento para filtrar agendamentos por telefone'}
     ],
     'responses': {
         200: {'description': 'Dados do agendamento'},
@@ -750,8 +755,18 @@ def create_appointment(slug):
 def get_appointment(code):
     """Consulta agendamento pelo código ou telefone"""
     try:
+        # Obter slug do estabelecimento para filtro (opcional)
+        business_slug = request.args.get('business_slug')
+        business_user = None
+        if business_slug:
+            business_user = User.query.filter_by(slug=business_slug, active=True).first()
+
         # Primeiro tenta buscar pelo código
         appointment = Appointment.query.filter_by(booking_code=code.upper()).first()
+
+        # Se fornecido business_slug, verificar se o agendamento pertence à empresa
+        if appointment and business_user and appointment.user_id != business_user.id:
+            appointment = None
 
         # Se não encontrar, tenta buscar pelo telefone do cliente
         if not appointment:
@@ -760,13 +775,19 @@ def get_appointment(code):
 
             if phone_clean:
                 # Busca agendamentos pelo telefone do cliente (mais recentes primeiro)
-                appointments = Appointment.query.join(Client).filter(
+                query = Appointment.query.join(Client).filter(
                     db.or_(
                         Client.phone == code,
                         Client.phone == phone_clean,
                         Client.phone.like(f'%{phone_clean}%')
                     )
-                ).order_by(Appointment.appointment_date.desc(), Appointment.start_time.desc()).all()
+                )
+
+                # Se fornecido business_slug, filtrar apenas pela empresa
+                if business_user:
+                    query = query.filter(Appointment.user_id == business_user.id)
+
+                appointments = query.order_by(Appointment.appointment_date.desc(), Appointment.start_time.desc()).all()
 
                 if appointments:
                     # Retorna lista de agendamentos encontrados
