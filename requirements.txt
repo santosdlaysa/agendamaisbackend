@@ -19,6 +19,6 @@ typing_extensions==4.15.0
 Werkzeug==2.3.7
 twilio==9.0.0
 flasgger==0.9.7.1
-Flask-Mail==0.10.0
+resend==2.5.0
 gunicorn==21.2.0
 APScheduler==3.10.4

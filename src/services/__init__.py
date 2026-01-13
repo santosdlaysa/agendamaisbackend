@@ -1,1 +1,1 @@
-from .email_service import mail, send_verification_email, send_email
+from .email_service import send_verification_email, send_email, send_professional_invite_email, send_professional_reset_email
