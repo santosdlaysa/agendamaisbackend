@@ -738,9 +738,9 @@ def create_appointment(slug):
 @swag_from({
     'tags': ['Agendamento Online'],
     'summary': 'Consultar agendamento',
-    'description': 'Consulta detalhes de um agendamento pelo código',
+    'description': 'Consulta detalhes de um agendamento pelo código ou telefone do cliente',
     'parameters': [
-        {'name': 'code', 'in': 'path', 'type': 'string', 'required': True}
+        {'name': 'code', 'in': 'path', 'type': 'string', 'required': True, 'description': 'Código do agendamento ou telefone do cliente'}
     ],
     'responses': {
         200: {'description': 'Dados do agendamento'},
@@ -748,14 +748,40 @@ def create_appointment(slug):
     }
 })
 def get_appointment(code):
-    """Consulta agendamento pelo código"""
+    """Consulta agendamento pelo código ou telefone"""
+    # Primeiro tenta buscar pelo código
     appointment = Appointment.query.filter_by(booking_code=code.upper()).first()
+
+    # Se não encontrar, tenta buscar pelo telefone do cliente
+    if not appointment:
+        # Limpa o telefone removendo caracteres não numéricos para comparação
+        phone_clean = ''.join(filter(str.isdigit, code))
+
+        if phone_clean:
+            # Busca agendamentos pelo telefone do cliente (mais recentes primeiro)
+            appointments = Appointment.query.join(Client).filter(
+                db.or_(
+                    Client.phone == code,
+                    Client.phone == phone_clean,
+                    Client.phone.like(f'%{phone_clean}%')
+                )
+            ).order_by(Appointment.date.desc(), Appointment.start_time.desc()).all()
+
+            if appointments:
+                # Retorna lista de agendamentos encontrados
+                response = {
+                    'appointments': [apt.to_public_dict() for apt in appointments],
+                    'count': len(appointments),
+                    'search_type': 'phone'
+                }
+                return jsonify(response), 200
 
     if not appointment:
         return jsonify({'error': 'Agendamento não encontrado'}), 404
 
     response = {
-        'appointment': appointment.to_public_dict()
+        'appointment': appointment.to_public_dict(),
+        'search_type': 'code'
     }
 
     # Adicionar informações de confirmação se pendente
