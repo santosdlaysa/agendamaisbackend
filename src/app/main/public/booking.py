@@ -749,47 +749,61 @@ def create_appointment(slug):
 })
 def get_appointment(code):
     """Consulta agendamento pelo código ou telefone"""
-    # Primeiro tenta buscar pelo código
-    appointment = Appointment.query.filter_by(booking_code=code.upper()).first()
+    try:
+        # Primeiro tenta buscar pelo código
+        appointment = Appointment.query.filter_by(booking_code=code.upper()).first()
 
-    # Se não encontrar, tenta buscar pelo telefone do cliente
-    if not appointment:
-        # Limpa o telefone removendo caracteres não numéricos para comparação
-        phone_clean = ''.join(filter(str.isdigit, code))
+        # Se não encontrar, tenta buscar pelo telefone do cliente
+        if not appointment:
+            # Limpa o telefone removendo caracteres não numéricos para comparação
+            phone_clean = ''.join(filter(str.isdigit, code))
 
-        if phone_clean:
-            # Busca agendamentos pelo telefone do cliente (mais recentes primeiro)
-            appointments = Appointment.query.join(Client).filter(
-                db.or_(
-                    Client.phone == code,
-                    Client.phone == phone_clean,
-                    Client.phone.like(f'%{phone_clean}%')
-                )
-            ).order_by(Appointment.date.desc(), Appointment.start_time.desc()).all()
+            if phone_clean:
+                # Busca agendamentos pelo telefone do cliente (mais recentes primeiro)
+                appointments = Appointment.query.join(Client).filter(
+                    db.or_(
+                        Client.phone == code,
+                        Client.phone == phone_clean,
+                        Client.phone.like(f'%{phone_clean}%')
+                    )
+                ).order_by(Appointment.appointment_date.desc(), Appointment.start_time.desc()).all()
 
-            if appointments:
-                # Retorna lista de agendamentos encontrados
-                response = {
-                    'appointments': [apt.to_public_dict() for apt in appointments],
-                    'count': len(appointments),
-                    'search_type': 'phone'
-                }
-                return jsonify(response), 200
+                if appointments:
+                    # Retorna lista de agendamentos encontrados
+                    appointments_data = []
+                    for apt in appointments:
+                        try:
+                            appointments_data.append(apt.to_public_dict())
+                        except Exception:
+                            # Pula agendamentos com dados inconsistentes
+                            continue
 
-    if not appointment:
-        return jsonify({'error': 'Agendamento não encontrado'}), 404
+                    if appointments_data:
+                        response = {
+                            'appointments': appointments_data,
+                            'count': len(appointments_data),
+                            'search_type': 'phone'
+                        }
+                        return jsonify(response), 200
 
-    response = {
-        'appointment': appointment.to_public_dict(),
-        'search_type': 'code'
-    }
+        if not appointment:
+            return jsonify({'error': 'Agendamento não encontrado'}), 404
 
-    # Adicionar informações de confirmação se pendente
-    if appointment.is_confirmation_pending():
-        response['requires_confirmation'] = True
-        response['confirmation_expired'] = appointment.is_confirmation_expired()
+        response = {
+            'appointment': appointment.to_public_dict(),
+            'search_type': 'code'
+        }
 
-    return jsonify(response), 200
+        # Adicionar informações de confirmação se pendente
+        if appointment.is_confirmation_pending():
+            response['requires_confirmation'] = True
+            response['confirmation_expired'] = appointment.is_confirmation_expired()
+
+        return jsonify(response), 200
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': 'Erro ao consultar agendamento', 'details': str(e)}), 500
 
 
 @public_bp.route('/appointments/confirm/<token>', methods=['POST'])

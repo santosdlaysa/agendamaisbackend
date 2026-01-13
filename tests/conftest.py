@@ -3,7 +3,7 @@ Configuração de testes para o sistema AgendaMais
 """
 import pytest
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date, time
 from app import create_app
 from src.config.database import db
 from src.models.user import User
@@ -11,6 +11,7 @@ from src.models.client import Client
 from src.models.subscription import Subscription
 from src.models.professional import Professional
 from src.models.service import Service
+from src.models.appointment import Appointment, generate_booking_code
 from flask_jwt_extended import create_access_token
 
 
@@ -247,3 +248,227 @@ def mock_stripe_webhook_event():
             }
         }
     return _create_event
+
+
+@pytest.fixture
+def test_appointment_with_code(app, db_session):
+    """Criar agendamento de teste com codigo e todas as dependencias"""
+    with app.app_context():
+        import uuid
+        unique_id = uuid.uuid4().hex[:8]
+        booking_code = f'ABC{unique_id[:5].upper()}'
+
+        # Criar usuario
+        user = User(
+            name='Business Owner',
+            email=f'business_{unique_id}@example.com',
+            password_hash='hashed_password',
+            role='admin'
+        )
+        db.session.add(user)
+        db.session.flush()
+
+        # Criar cliente
+        client = Client(
+            name='Cliente Teste',
+            email=f'cliente_{unique_id}@example.com',
+            phone='11999887766',
+            user_id=user.id
+        )
+        db.session.add(client)
+        db.session.flush()
+
+        # Criar profissional
+        professional = Professional(
+            name='Profissional Teste',
+            role='Cabeleireiro',
+            email=f'prof_{unique_id}@example.com',
+            phone='11977776666',
+            color='#3B82F6',
+            user_id=user.id
+        )
+        db.session.add(professional)
+        db.session.flush()
+
+        # Criar servico
+        service = Service(
+            name='Corte de Cabelo',
+            description='Corte masculino',
+            price=50.00,
+            duration=30,
+            color='#10B981',
+            user_id=user.id
+        )
+        db.session.add(service)
+        db.session.flush()
+
+        # Criar agendamento
+        appointment = Appointment(
+            client_id=client.id,
+            professional_id=professional.id,
+            service_id=service.id,
+            appointment_date=date.today() + timedelta(days=1),
+            start_time=time(10, 0),
+            end_time=time(10, 30),
+            status='scheduled',
+            booking_code=booking_code,
+            source='online',
+            user_id=user.id
+        )
+        db.session.add(appointment)
+        db.session.commit()
+
+        return {
+            'appointment': appointment,
+            'client': client,
+            'professional': professional,
+            'service': service,
+            'user': user,
+            'booking_code': booking_code
+        }
+
+
+@pytest.fixture
+def test_multiple_appointments_same_client(app, db_session):
+    """Criar multiplos agendamentos para o mesmo cliente"""
+    with app.app_context():
+        import uuid
+        unique_id = uuid.uuid4().hex[:8]
+
+        # Criar usuario
+        user = User(
+            name='Business Owner Multi',
+            email=f'business_multi_{unique_id}@example.com',
+            password_hash='hashed_password',
+            role='admin'
+        )
+        db.session.add(user)
+        db.session.flush()
+
+        # Criar cliente
+        client = Client(
+            name='Cliente Multi',
+            email=f'cliente_multi_{unique_id}@example.com',
+            phone='11999887766',
+            user_id=user.id
+        )
+        db.session.add(client)
+        db.session.flush()
+
+        # Criar profissional
+        professional = Professional(
+            name='Profissional Multi',
+            role='Cabeleireiro',
+            email=f'prof_multi_{unique_id}@example.com',
+            phone='11977776666',
+            color='#3B82F6',
+            user_id=user.id
+        )
+        db.session.add(professional)
+        db.session.flush()
+
+        # Criar servico
+        service = Service(
+            name='Corte de Cabelo',
+            description='Corte masculino',
+            price=50.00,
+            duration=30,
+            color='#10B981',
+            user_id=user.id
+        )
+        db.session.add(service)
+        db.session.flush()
+
+        # Criar multiplos agendamentos
+        appointments = []
+        for i in range(3):
+            appointment = Appointment(
+                client_id=client.id,
+                professional_id=professional.id,
+                service_id=service.id,
+                appointment_date=date.today() + timedelta(days=i+3),
+                start_time=time(9 + i, 0),
+                end_time=time(9 + i, 30),
+                status='scheduled',
+                booking_code=f'MLT{unique_id[:4]}{i}',
+                source='online',
+                user_id=user.id
+            )
+            db.session.add(appointment)
+            appointments.append(appointment)
+
+        db.session.commit()
+        return appointments
+
+
+@pytest.fixture
+def test_appointment_formatted_phone(app, db_session):
+    """Criar agendamento de teste com cliente que tem telefone formatado"""
+    with app.app_context():
+        import uuid
+        unique_id = uuid.uuid4().hex[:8]
+
+        # Criar usuario
+        user = User(
+            name='Business Owner Fmt',
+            email=f'business_fmt_{unique_id}@example.com',
+            password_hash='hashed_password',
+            role='admin'
+        )
+        db.session.add(user)
+        db.session.flush()
+
+        # Criar cliente com telefone formatado
+        client = Client(
+            name='Cliente Formatado',
+            email=f'cliente_fmt_{unique_id}@example.com',
+            phone='(11) 98888-7777',
+            user_id=user.id
+        )
+        db.session.add(client)
+        db.session.flush()
+
+        # Criar profissional
+        professional = Professional(
+            name='Profissional Fmt',
+            role='Cabeleireiro',
+            email=f'prof_fmt_{unique_id}@example.com',
+            phone='11977776666',
+            color='#3B82F6',
+            user_id=user.id
+        )
+        db.session.add(professional)
+        db.session.flush()
+
+        # Criar servico
+        service = Service(
+            name='Corte de Cabelo',
+            description='Corte masculino',
+            price=50.00,
+            duration=30,
+            color='#10B981',
+            user_id=user.id
+        )
+        db.session.add(service)
+        db.session.flush()
+
+        # Criar agendamento
+        appointment = Appointment(
+            client_id=client.id,
+            professional_id=professional.id,
+            service_id=service.id,
+            appointment_date=date.today() + timedelta(days=5),
+            start_time=time(16, 0),
+            end_time=time(16, 30),
+            status='scheduled',
+            booking_code=f'FMT{unique_id[:5]}',
+            source='online',
+            user_id=user.id
+        )
+        db.session.add(appointment)
+        db.session.commit()
+
+        return {
+            'appointment': appointment,
+            'client': client
+        }

@@ -69,23 +69,42 @@ class Appointment(db.Model):
 
     def to_public_dict(self):
         """Dados públicos para o cliente visualizar seu agendamento"""
+        # Carrega relacionamentos de forma segura
+        professional_data = None
+        service_data = None
+        client_data = None
+
+        try:
+            if self.professional:
+                professional_data = {'name': self.professional.name}
+        except Exception:
+            professional_data = None
+
+        try:
+            if self.service:
+                service_data = {
+                    'name': self.service.name,
+                    'duration': self.service.duration,
+                    'price': float(self.service.price) if self.service.price else None
+                }
+        except Exception:
+            service_data = None
+
+        try:
+            if self.client:
+                client_data = {'name': self.client.name}
+        except Exception:
+            client_data = None
+
         return {
             'booking_code': self.booking_code,
             'appointment_date': self.appointment_date.isoformat() if self.appointment_date else None,
             'start_time': self.start_time.strftime('%H:%M') if self.start_time else None,
             'end_time': self.end_time.strftime('%H:%M') if self.end_time else None,
             'status': self.status,
-            'professional': {
-                'name': self.professional.name if self.professional else None
-            } if self.professional else None,
-            'service': {
-                'name': self.service.name if self.service else None,
-                'duration': self.service.duration if self.service else None,
-                'price': float(self.service.price) if self.service and self.service.price else None
-            } if self.service else None,
-            'client': {
-                'name': self.client.name if self.client else None
-            } if self.client else None
+            'professional': professional_data,
+            'service': service_data,
+            'client': client_data
         }
     
     def to_dict_with_stats(self):

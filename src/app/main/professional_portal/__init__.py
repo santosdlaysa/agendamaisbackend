@@ -1,0 +1,2 @@
+from .professional_auth import professional_auth_bp
+from .professional_dashboard import professional_dashboard_bp

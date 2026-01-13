@@ -5,6 +5,7 @@ from .service import Service
 from .appointment import Appointment
 from .subscription import Subscription
 from .working_hours import WorkingHours, ProfessionalBlockedDate
+from .professional_user import ProfessionalUser
 
 # Import reminder models after appointment to avoid circular dependency
 try:
