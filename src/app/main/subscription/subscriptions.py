@@ -191,7 +191,7 @@ def create_subscription():
                 'quantity': 1
             }],
             subscription_data={
-                'trial_period_days': 7,
+                'trial_period_days': 3,
                 'metadata': {
                     'user_id': str(user_id),
                     'plan': plan
@@ -724,7 +724,7 @@ def retry_checkout():
                 'quantity': 1
             }],
             subscription_data={
-                'trial_period_days': 7,
+                'trial_period_days': 3,
                 'metadata': {
                     'user_id': str(user_id),
                     'plan': plan
