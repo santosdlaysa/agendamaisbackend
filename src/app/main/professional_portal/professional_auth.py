@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity, get_jwt
 from flasgger import swag_from
 from datetime import datetime, timedelta
@@ -6,6 +6,7 @@ import secrets
 from src.config.database import db
 from src.models.professional_user import ProfessionalUser
 from src.models.professional import Professional
+from src.services.email_service import send_professional_invite_email, send_professional_reset_email
 
 professional_auth_bp = Blueprint('professional_auth', __name__)
 
@@ -80,13 +81,19 @@ def invite_professional():
         db.session.add(professional_user)
         db.session.commit()
 
-        # TODO: Enviar email com link de ativacao
-        # link = f"{FRONTEND_URL}/#/profissional/ativar/{invite_token}"
-        # send_invite_email(email, professional.name, link)
+        # Enviar email com link de ativacao
+        frontend_url = current_app.config.get('FRONTEND_URL', 'http://localhost:3000')
+        activation_url = f"{frontend_url}/#/profissional/ativar/{invite_token}"
+
+        email_sent, email_message = send_professional_invite_email(
+            email=email,
+            professional_name=professional.name,
+            activation_url=activation_url
+        )
 
         return jsonify({
             'message': 'Convite enviado com sucesso',
-            'invite_token': invite_token,  # Para debug - remover em producao
+            'email_sent': email_sent,
             'invite_link': f'/profissional/ativar/{invite_token}'
         }), 201
 
@@ -273,9 +280,15 @@ def forgot_password():
             professional_user.reset_expires_at = datetime.utcnow() + timedelta(hours=1)
             db.session.commit()
 
-            # TODO: Enviar email
-            # link = f"{FRONTEND_URL}/#/profissional/resetar-senha/{reset_token}"
-            # send_reset_email(email, link)
+            # Enviar email de recuperacao
+            frontend_url = current_app.config.get('FRONTEND_URL', 'http://localhost:3000')
+            reset_url = f"{frontend_url}/#/profissional/resetar-senha/{reset_token}"
+
+            send_professional_reset_email(
+                email=email,
+                professional_name=professional_user.professional.name,
+                reset_url=reset_url
+            )
 
         return jsonify({'message': 'Se o email existir, um link de recuperacao sera enviado'}), 200
 

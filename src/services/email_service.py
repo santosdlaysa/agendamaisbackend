@@ -97,3 +97,181 @@ def send_verification_email(user, verification_url):
         html_body=html_body,
         text_body=text_body
     )
+
+
+# Template HTML para convite de profissional
+PROFESSIONAL_INVITE_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background-color: #4F46E5; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
+        .content { background-color: #f9fafb; padding: 30px; border: 1px solid #e5e7eb; }
+        .button { display: inline-block; background-color: #4F46E5; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; margin: 20px 0; }
+        .footer { text-align: center; padding: 20px; color: #6b7280; font-size: 12px; }
+        .highlight { background-color: #e0e7ff; padding: 15px; border-radius: 6px; margin: 15px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Agenda+</h1>
+            <p>Portal do Profissional</p>
+        </div>
+        <div class="content">
+            <h2>Voce foi convidado!</h2>
+            <p>Ola <strong>{{ professional_name }}</strong>,</p>
+            <p>Voce recebeu um convite para acessar o <strong>Portal do Profissional</strong> do Agenda+.</p>
+
+            <div class="highlight">
+                <p><strong>Com o portal voce podera:</strong></p>
+                <ul>
+                    <li>Visualizar sua agenda de atendimentos</li>
+                    <li>Gerenciar seus horarios de trabalho</li>
+                    <li>Acompanhar suas estatisticas</li>
+                    <li>Ver historico de clientes atendidos</li>
+                </ul>
+            </div>
+
+            <p>Para ativar sua conta, clique no botao abaixo e defina sua senha:</p>
+
+            <p style="text-align: center;">
+                <a href="{{ activation_url }}" class="button">Ativar Minha Conta</a>
+            </p>
+
+            <p>Ou copie e cole este link no seu navegador:</p>
+            <p style="word-break: break-all; color: #4F46E5;">{{ activation_url }}</p>
+
+            <p><strong>Este link expira em 48 horas.</strong></p>
+        </div>
+        <div class="footer">
+            <p>&copy; {{ year }} Agenda+ - Sistema de Agendamentos</p>
+            <p>Este e um email automatico, nao responda.</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+# Template HTML para reset de senha do profissional
+PROFESSIONAL_RESET_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background-color: #4F46E5; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
+        .content { background-color: #f9fafb; padding: 30px; border: 1px solid #e5e7eb; }
+        .button { display: inline-block; background-color: #4F46E5; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; margin: 20px 0; }
+        .footer { text-align: center; padding: 20px; color: #6b7280; font-size: 12px; }
+        .warning { background-color: #fef3c7; padding: 15px; border-radius: 6px; margin: 15px 0; border-left: 4px solid #f59e0b; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Agenda+</h1>
+            <p>Portal do Profissional</p>
+        </div>
+        <div class="content">
+            <h2>Recuperacao de Senha</h2>
+            <p>Ola <strong>{{ professional_name }}</strong>,</p>
+            <p>Recebemos uma solicitacao para redefinir a senha da sua conta no Portal do Profissional.</p>
+
+            <p>Clique no botao abaixo para criar uma nova senha:</p>
+
+            <p style="text-align: center;">
+                <a href="{{ reset_url }}" class="button">Redefinir Senha</a>
+            </p>
+
+            <p>Ou copie e cole este link no seu navegador:</p>
+            <p style="word-break: break-all; color: #4F46E5;">{{ reset_url }}</p>
+
+            <div class="warning">
+                <p><strong>Atencao:</strong> Este link expira em 1 hora.</p>
+                <p>Se voce nao solicitou a recuperacao de senha, ignore este email. Sua senha permanecera inalterada.</p>
+            </div>
+        </div>
+        <div class="footer">
+            <p>&copy; {{ year }} Agenda+ - Sistema de Agendamentos</p>
+            <p>Este e um email automatico, nao responda.</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+
+def send_professional_invite_email(email, professional_name, activation_url):
+    """Envia email de convite para profissional"""
+    from datetime import datetime
+
+    html_body = render_template_string(
+        PROFESSIONAL_INVITE_TEMPLATE,
+        professional_name=professional_name,
+        activation_url=activation_url,
+        year=datetime.now().year
+    )
+
+    text_body = f"""
+    Ola {professional_name},
+
+    Voce foi convidado para acessar o Portal do Profissional do Agenda+.
+
+    Com o portal voce podera:
+    - Visualizar sua agenda de atendimentos
+    - Gerenciar seus horarios de trabalho
+    - Acompanhar suas estatisticas
+    - Ver historico de clientes atendidos
+
+    Para ativar sua conta, acesse: {activation_url}
+
+    Este link expira em 48 horas.
+
+    Agenda+ - Sistema de Agendamentos
+    """
+
+    return send_email(
+        subject='Voce foi convidado para o Portal do Profissional - Agenda+',
+        recipient=email,
+        html_body=html_body,
+        text_body=text_body
+    )
+
+
+def send_professional_reset_email(email, professional_name, reset_url):
+    """Envia email de recuperacao de senha para profissional"""
+    from datetime import datetime
+
+    html_body = render_template_string(
+        PROFESSIONAL_RESET_TEMPLATE,
+        professional_name=professional_name,
+        reset_url=reset_url,
+        year=datetime.now().year
+    )
+
+    text_body = f"""
+    Ola {professional_name},
+
+    Recebemos uma solicitacao para redefinir a senha da sua conta no Portal do Profissional.
+
+    Para criar uma nova senha, acesse: {reset_url}
+
+    Este link expira em 1 hora.
+
+    Se voce nao solicitou a recuperacao de senha, ignore este email.
+
+    Agenda+ - Sistema de Agendamentos
+    """
+
+    return send_email(
+        subject='Recuperacao de Senha - Portal do Profissional - Agenda+',
+        recipient=email,
+        html_body=html_body,
+        text_body=text_body
+    )
