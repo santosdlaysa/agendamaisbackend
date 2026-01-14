@@ -982,31 +982,41 @@ def invite_professional_to_portal(professional_id):
         if not professional:
             return jsonify({'message': 'Profissional nao encontrado'}), 404
 
-        # Verificar se ja existe conta com este email
-        existing_email = ProfessionalUser.query.filter_by(email=email).first()
-        if existing_email:
-            return jsonify({'message': 'Ja existe uma conta com este email'}), 400
-
         # Verificar se profissional ja tem conta
         existing_professional = ProfessionalUser.query.filter_by(professional_id=professional_id).first()
+        is_resend = False
+
         if existing_professional:
-            return jsonify({'message': 'Profissional ja possui uma conta'}), 400
+            # Se ja tem conta ativa (com senha), nao permite reenviar
+            if existing_professional.password_hash and existing_professional.is_active:
+                return jsonify({'message': 'Profissional ja possui uma conta ativa'}), 400
 
-        # Criar usuario com token de convite
-        invite_token = secrets.token_urlsafe(32)
-        professional_user = ProfessionalUser(
-            professional_id=professional_id,
-            email=email,
-            invite_token=invite_token,
-            invite_expires_at=datetime.utcnow() + timedelta(hours=48)
-        )
+            # Convite pendente - atualizar email, token e reenviar
+            existing_professional.email = email
+            existing_professional.invite_token = secrets.token_urlsafe(32)
+            existing_professional.invite_expires_at = datetime.utcnow() + timedelta(hours=48)
+            professional_user = existing_professional
+            is_resend = True
+        else:
+            # Verificar se ja existe conta com este email para outro profissional
+            existing_email = ProfessionalUser.query.filter_by(email=email).first()
+            if existing_email:
+                return jsonify({'message': 'Ja existe uma conta com este email'}), 400
 
-        db.session.add(professional_user)
+            # Criar novo usuario com token de convite
+            professional_user = ProfessionalUser(
+                professional_id=professional_id,
+                email=email,
+                invite_token=secrets.token_urlsafe(32),
+                invite_expires_at=datetime.utcnow() + timedelta(hours=48)
+            )
+            db.session.add(professional_user)
+
         db.session.commit()
 
         # Enviar email com link de ativacao
         frontend_url = current_app.config.get('FRONTEND_URL', 'http://localhost:3000')
-        activation_url = f"{frontend_url.rstrip('/')}/#/profissional/ativar/{invite_token}"
+        activation_url = f"{frontend_url.rstrip('/')}/#/profissional/ativar/{professional_user.invite_token}"
 
         email_sent, email_message = send_professional_invite_email(
             email=email,
@@ -1014,10 +1024,12 @@ def invite_professional_to_portal(professional_id):
             activation_url=activation_url
         )
 
+        message = 'Convite reenviado com sucesso' if is_resend else 'Convite enviado com sucesso'
         return jsonify({
-            'message': 'Convite enviado com sucesso',
+            'message': message,
             'email_sent': email_sent,
-            'invite_link': f'/profissional/ativar/{invite_token}'
+            'is_resend': is_resend,
+            'invite_link': f'/profissional/ativar/{professional_user.invite_token}'
         }), 201
 
     except Exception as e:
