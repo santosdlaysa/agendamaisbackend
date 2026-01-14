@@ -320,11 +320,15 @@ def get_schedule():
         if not professional_id:
             return jsonify({'message': 'Acesso nao autorizado'}), 403
 
-        start_date = request.args.get('start_date')
-        end_date = request.args.get('end_date')
+        start_date_str = request.args.get('start_date')
+        end_date_str = request.args.get('end_date')
 
-        if not start_date or not end_date:
+        if not start_date_str or not end_date_str:
             return jsonify({'message': 'start_date e end_date sao obrigatorios'}), 400
+
+        # Converter strings para objetos date
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+        end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
 
         appointments = Appointment.query.filter(
             and_(
