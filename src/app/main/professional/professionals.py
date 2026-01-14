@@ -1,11 +1,14 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from flasgger import swag_from
 from datetime import datetime, time, timedelta
+import secrets
 from src.models.user import db
 from src.models.professional import Professional
+from src.models.professional_user import ProfessionalUser
 from src.models.service import Service
 from src.models.working_hours import WorkingHours, ProfessionalBlockedDate
+from src.services.email_service import send_professional_invite_email
 
 professionals_bp = Blueprint('professionals', __name__)
 
@@ -928,3 +931,95 @@ def remove_blocked_date(professional_id, blocked_id):
         db.session.rollback()
         return jsonify(message=f'Erro ao desbloquear data: {str(e)}'), 500
 
+
+
+# ============================================
+# ROTA DE CONVITE PARA PORTAL DO PROFISSIONAL
+# ============================================
+
+@professionals_bp.route('/<int:professional_id>/invite', methods=['POST'])
+@jwt_required()
+@swag_from({
+    'tags': ['Profissionais'],
+    'summary': 'Enviar convite para profissional acessar o portal',
+    'parameters': [
+        {'name': 'professional_id', 'in': 'path', 'type': 'integer', 'required': True},
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['email'],
+                'properties': {
+                    'email': {'type': 'string', 'format': 'email'}
+                }
+            }
+        }
+    ],
+    'responses': {
+        201: {'description': 'Convite enviado com sucesso'},
+        400: {'description': 'Dados invalidos ou conta ja existe'},
+        404: {'description': 'Profissional nao encontrado'}
+    }
+})
+def invite_professional_to_portal(professional_id):
+    """Envia convite para profissional criar conta no portal"""
+    try:
+        user_id = get_current_user_id()
+        data = request.get_json()
+        email = data.get('email')
+
+        if not email:
+            return jsonify({'message': 'Email e obrigatorio'}), 400
+
+        # Verificar se profissional existe e pertence ao usuario
+        professional = Professional.query.filter_by(
+            id=professional_id,
+            user_id=user_id
+        ).first()
+
+        if not professional:
+            return jsonify({'message': 'Profissional nao encontrado'}), 404
+
+        # Verificar se ja existe conta com este email
+        existing_email = ProfessionalUser.query.filter_by(email=email).first()
+        if existing_email:
+            return jsonify({'message': 'Ja existe uma conta com este email'}), 400
+
+        # Verificar se profissional ja tem conta
+        existing_professional = ProfessionalUser.query.filter_by(professional_id=professional_id).first()
+        if existing_professional:
+            return jsonify({'message': 'Profissional ja possui uma conta'}), 400
+
+        # Criar usuario com token de convite
+        invite_token = secrets.token_urlsafe(32)
+        professional_user = ProfessionalUser(
+            professional_id=professional_id,
+            email=email,
+            invite_token=invite_token,
+            invite_expires_at=datetime.utcnow() + timedelta(hours=48)
+        )
+
+        db.session.add(professional_user)
+        db.session.commit()
+
+        # Enviar email com link de ativacao
+        frontend_url = current_app.config.get('FRONTEND_URL', 'http://localhost:3000')
+        activation_url = f"{frontend_url}/#/profissional/ativar/{invite_token}"
+
+        email_sent, email_message = send_professional_invite_email(
+            email=email,
+            professional_name=professional.name,
+            activation_url=activation_url
+        )
+
+        return jsonify({
+            'message': 'Convite enviado com sucesso',
+            'email_sent': email_sent,
+            'invite_link': f'/profissional/ativar/{invite_token}'
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'message': f'Erro ao enviar convite: {str(e)}'}), 500
