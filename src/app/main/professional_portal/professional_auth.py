@@ -83,7 +83,7 @@ def invite_professional():
 
         # Enviar email com link de ativacao
         frontend_url = current_app.config.get('FRONTEND_URL', 'http://localhost:3000')
-        activation_url = f"{frontend_url}/#/profissional/ativar/{invite_token}"
+        activation_url = f"{frontend_url.rstrip('/')}/#/profissional/ativar/{invite_token}"
 
         email_sent, email_message = send_professional_invite_email(
             email=email,
