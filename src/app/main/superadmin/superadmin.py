@@ -245,6 +245,7 @@ def get_company(company_id):
         'active': user.active,
         'email_verified': user.email_verified,
         'online_booking_enabled': user.online_booking_enabled,
+        'created_at': user.created_at.isoformat() if user.created_at else None,
         'subscription': subscription.to_dict() if subscription else None,
         'subscription_history': subscription_history,
         'stats': {
