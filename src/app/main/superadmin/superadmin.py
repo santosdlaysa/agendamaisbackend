@@ -147,6 +147,7 @@ def get_companies():
             'slug': user.slug,
             'active': user.active,
             'email_verified': user.email_verified,
+            'created_at': user.created_at.isoformat() if user.created_at else None,
             'subscription': {
                 'plan': subscription.plan if subscription else None,
                 'status': subscription.status if subscription else None,
