@@ -15,6 +15,7 @@ from src.app.main.subscription.subscriptions import subscriptions_bp
 from src.app.main.public.booking import public_bp
 from src.app.main.professional_portal.professional_auth import professional_auth_bp
 from src.app.main.professional_portal.professional_dashboard import professional_dashboard_bp
+from src.app.main.superadmin.superadmin import superadmin_bp
 # Import reminder blueprint conditionally
 try:
     from src.app.main.reminder.reminders import reminders_bp
@@ -127,7 +128,12 @@ def create_app():
             {"name": "Profissionais", "description": "Gerenciamento de profissionais"},
             {"name": "Serviços", "description": "Gerenciamento de serviços"},
             {"name": "Agendamentos", "description": "Gerenciamento de agendamentos"},
-            {"name": "Assinaturas", "description": "Gerenciamento de assinaturas SaaS"}
+            {"name": "Assinaturas", "description": "Gerenciamento de assinaturas SaaS"},
+            {"name": "Super Admin - Companies", "description": "Gerenciamento de empresas (Super Admin)"},
+            {"name": "Super Admin - Subscriptions", "description": "Gerenciamento de assinaturas (Super Admin)"},
+            {"name": "Super Admin - Analytics", "description": "Métricas e análises (Super Admin)"},
+            {"name": "Super Admin - Alerts", "description": "Alertas do sistema (Super Admin)"},
+            {"name": "Super Admin - Activity", "description": "Atividades recentes (Super Admin)"}
         ],
         "definitions": {
             "User": {
@@ -232,6 +238,9 @@ def create_app():
     # Portal do Profissional
     app.register_blueprint(professional_auth_bp, url_prefix='/api/professional-auth')
     app.register_blueprint(professional_dashboard_bp, url_prefix='/api/professional')
+
+    # Super Admin
+    app.register_blueprint(superadmin_bp, url_prefix='/api/superadmin')
 
     # Register reminder blueprint if available
     if REMINDERS_AVAILABLE and reminders_bp:
