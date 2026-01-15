@@ -279,12 +279,12 @@ def update_professional(professional_id):
 @swag_from({
     'tags': ['Profissionais'],
     'summary': 'Excluir profissional',
-    'description': 'Remove um profissional. Não é possível excluir com agendamentos futuros.',
+    'description': 'Remove um profissional. Não é possível excluir com agendamentos futuros. Se houver histórico de agendamentos, o profissional será desativado.',
     'parameters': [
         {'name': 'professional_id', 'in': 'path', 'type': 'integer', 'required': True}
     ],
     'responses': {
-        200: {'description': 'Profissional excluído com sucesso'},
+        200: {'description': 'Profissional excluído/desativado com sucesso'},
         400: {'description': 'Profissional possui agendamentos futuros'},
         404: {'description': 'Profissional não encontrado'}
     }
@@ -310,6 +310,14 @@ def delete_professional(professional_id):
                 message='Não é possível excluir profissional com agendamentos futuros. Cancele os agendamentos primeiro.'
             ), 400
 
+        # Verificar se tem histórico de agendamentos
+        if professional.appointments:
+            # Soft delete: desativar profissional para preservar histórico
+            professional.active = False
+            db.session.commit()
+            return jsonify(message='Profissional desativado com sucesso (histórico preservado)'), 200
+
+        # Sem agendamentos: pode deletar fisicamente
         db.session.delete(professional)
         db.session.commit()
 
