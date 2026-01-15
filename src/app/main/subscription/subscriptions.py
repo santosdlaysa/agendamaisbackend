@@ -181,7 +181,17 @@ def create_subscription():
             )
             stripe_customer_id = customer.id
 
-        # Criar Checkout Session - coleta cartão antes do trial
+        # Criar Checkout Session - coleta cartão antes do trial (exceto plano basic)
+        subscription_data = {
+            'metadata': {
+                'user_id': str(user_id),
+                'plan': plan
+            }
+        }
+        # Trial de 3 dias apenas para planos Pro e Enterprise
+        if plan != 'basic':
+            subscription_data['trial_period_days'] = 3
+
         checkout_session = stripe.checkout.Session.create(
             customer=stripe_customer_id,
             payment_method_types=['card'],
@@ -190,13 +200,7 @@ def create_subscription():
                 'price': PLANS[plan]['price_id'],
                 'quantity': 1
             }],
-            subscription_data={
-                'trial_period_days': 3,
-                'metadata': {
-                    'user_id': str(user_id),
-                    'plan': plan
-                }
-            },
+            subscription_data=subscription_data,
             success_url=success_url if '{CHECKOUT_SESSION_ID}' in success_url else success_url + '?session_id={CHECKOUT_SESSION_ID}',
             cancel_url=cancel_url,
             metadata={
@@ -715,6 +719,16 @@ def retry_checkout():
             stripe_customer_id = customer.id
 
         # Criar nova Checkout Session
+        subscription_data_reactivate = {
+            'metadata': {
+                'user_id': str(user_id),
+                'plan': plan
+            }
+        }
+        # Trial de 3 dias apenas para planos Pro e Enterprise
+        if plan != 'basic':
+            subscription_data_reactivate['trial_period_days'] = 3
+
         checkout_session = stripe.checkout.Session.create(
             customer=stripe_customer_id,
             payment_method_types=['card'],
@@ -723,13 +737,7 @@ def retry_checkout():
                 'price': PLANS[plan]['price_id'],
                 'quantity': 1
             }],
-            subscription_data={
-                'trial_period_days': 3,
-                'metadata': {
-                    'user_id': str(user_id),
-                    'plan': plan
-                }
-            },
+            subscription_data=subscription_data_reactivate,
             success_url=success_url if '{CHECKOUT_SESSION_ID}' in success_url else success_url + '?session_id={CHECKOUT_SESSION_ID}',
             cancel_url=cancel_url,
             metadata={
