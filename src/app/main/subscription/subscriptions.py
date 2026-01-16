@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from src.config.database import db
 from src.models.subscription import Subscription
 from src.models.user import User
+from src.models.payment import Payment
 
 # Configurar Stripe
 stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
@@ -826,15 +827,42 @@ def stripe_webhook():
 
     elif event_type == 'invoice.paid':
         # Pagamento bem-sucedido
-        subscription_id = data_object.get('subscription')
+        stripe_subscription_id = data_object.get('subscription')
         subscription = Subscription.query.filter_by(
-            stripe_subscription_id=subscription_id
+            stripe_subscription_id=stripe_subscription_id
         ).first()
 
         if subscription:
+            # Atualizar status da subscription
             subscription.status = 'active'
+
+            # Criar registro de pagamento
+            stripe_invoice_id = data_object.get('id')
+            existing_payment = Payment.query.filter_by(stripe_invoice_id=stripe_invoice_id).first()
+
+            if not existing_payment:
+                amount_cents = data_object.get('amount_paid', 0)
+                paid_at_timestamp = data_object.get('status_transitions', {}).get('paid_at') or data_object.get('created')
+                period_start_timestamp = data_object.get('period_start')
+                period_end_timestamp = data_object.get('period_end')
+
+                payment = Payment(
+                    subscription_id=subscription.id,
+                    user_id=subscription.user_id,
+                    stripe_invoice_id=stripe_invoice_id,
+                    stripe_payment_intent_id=data_object.get('payment_intent'),
+                    amount=amount_cents / 100,
+                    currency=data_object.get('currency', 'brl'),
+                    status='paid',
+                    paid_at=datetime.fromtimestamp(paid_at_timestamp) if paid_at_timestamp else datetime.utcnow(),
+                    period_start=datetime.fromtimestamp(period_start_timestamp) if period_start_timestamp else None,
+                    period_end=datetime.fromtimestamp(period_end_timestamp) if period_end_timestamp else None
+                )
+                db.session.add(payment)
+                print(f"Pagamento {stripe_invoice_id} registrado: R$ {amount_cents / 100:.2f}")
+
             db.session.commit()
-            print(f"Assinatura {subscription_id} marcada como ativa")
+            print(f"Assinatura {stripe_subscription_id} marcada como ativa")
 
     elif event_type == 'invoice.payment_failed':
         # Falha no pagamento

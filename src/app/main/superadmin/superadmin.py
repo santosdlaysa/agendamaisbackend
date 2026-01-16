@@ -13,6 +13,7 @@ from src.models.subscription import Subscription
 from src.models.client import Client
 from src.models.professional import Professional
 from src.models.appointment import Appointment
+from src.models.payment import Payment
 from src.decorators.admin_required import admin_required
 
 superadmin_bp = Blueprint('superadmin', __name__)
@@ -1122,4 +1123,278 @@ def get_recent_activity():
     return jsonify({
         'activities': activities[:limit],
         'total': len(activities)
+    }), 200
+
+
+# ============================================================================
+# PAYMENTS (PAGAMENTOS/FATURAMENTO)
+# ============================================================================
+
+@superadmin_bp.route('/payments', methods=['GET'])
+@jwt_required()
+@admin_required
+def get_payments():
+    """
+    Lista todos os pagamentos/faturamentos da plataforma.
+    ---
+    tags:
+      - Super Admin - Payments
+    security:
+      - Bearer: []
+    parameters:
+      - name: page
+        in: query
+        type: integer
+        default: 1
+      - name: limit
+        in: query
+        type: integer
+        default: 20
+      - name: status
+        in: query
+        type: string
+        enum: [paid, pending, failed, all]
+        default: all
+      - name: start_date
+        in: query
+        type: string
+        format: date
+        description: Data inicial (YYYY-MM-DD)
+      - name: end_date
+        in: query
+        type: string
+        format: date
+        description: Data final (YYYY-MM-DD)
+      - name: sort_by
+        in: query
+        type: string
+        enum: [paid_at, amount, created_at]
+        default: paid_at
+      - name: sort_order
+        in: query
+        type: string
+        enum: [asc, desc]
+        default: desc
+    responses:
+      200:
+        description: Lista de pagamentos
+    """
+    page = request.args.get('page', 1, type=int)
+    limit = request.args.get('limit', 20, type=int)
+    status = request.args.get('status', 'all')
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    sort_by = request.args.get('sort_by', 'paid_at')
+    sort_order = request.args.get('sort_order', 'desc')
+
+    # Base query com joins
+    query = Payment.query.join(Subscription).join(User)
+
+    # Filtro por status
+    if status != 'all':
+        query = query.filter(Payment.status == status)
+
+    # Filtro por data
+    if start_date:
+        try:
+            start = datetime.strptime(start_date, '%Y-%m-%d')
+            query = query.filter(Payment.paid_at >= start)
+        except ValueError:
+            pass
+
+    if end_date:
+        try:
+            end = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
+            query = query.filter(Payment.paid_at < end)
+        except ValueError:
+            pass
+
+    # Ordenação
+    if sort_by == 'amount':
+        order_col = Payment.amount
+    elif sort_by == 'created_at':
+        order_col = Payment.created_at
+    else:
+        order_col = Payment.paid_at
+
+    if sort_order == 'desc':
+        query = query.order_by(desc(order_col))
+    else:
+        query = query.order_by(order_col)
+
+    # Paginação
+    pagination = query.paginate(page=page, per_page=limit, error_out=False)
+
+    payments = []
+    for payment in pagination.items:
+        user = User.query.get(payment.user_id)
+        subscription = Subscription.query.get(payment.subscription_id)
+
+        payments.append({
+            'id': payment.id,
+            'stripe_invoice_id': payment.stripe_invoice_id,
+            'stripe_payment_intent_id': payment.stripe_payment_intent_id,
+            'amount': float(payment.amount) if payment.amount else 0,
+            'currency': payment.currency,
+            'status': payment.status,
+            'paid_at': payment.paid_at.isoformat() if payment.paid_at else None,
+            'period_start': payment.period_start.isoformat() if payment.period_start else None,
+            'period_end': payment.period_end.isoformat() if payment.period_end else None,
+            'created_at': payment.created_at.isoformat() if payment.created_at else None,
+            'company': {
+                'id': user.id if user else None,
+                'name': user.name if user else None,
+                'email': user.email if user else None
+            },
+            'subscription': {
+                'id': subscription.id if subscription else None,
+                'plan': subscription.plan if subscription else None,
+                'status': subscription.status if subscription else None
+            }
+        })
+
+    return jsonify({
+        'payments': payments,
+        'pagination': {
+            'page': page,
+            'limit': limit,
+            'total': pagination.total,
+            'pages': pagination.pages,
+            'has_next': pagination.has_next,
+            'has_prev': pagination.has_prev
+        }
+    }), 200
+
+
+@superadmin_bp.route('/payments/<int:payment_id>', methods=['GET'])
+@jwt_required()
+@admin_required
+def get_payment(payment_id):
+    """
+    Obtém detalhes de um pagamento específico.
+    ---
+    tags:
+      - Super Admin - Payments
+    security:
+      - Bearer: []
+    parameters:
+      - name: payment_id
+        in: path
+        type: integer
+        required: true
+    responses:
+      200:
+        description: Detalhes do pagamento
+      404:
+        description: Pagamento não encontrado
+    """
+    payment = Payment.query.get(payment_id)
+    if not payment:
+        return jsonify({'error': 'Pagamento não encontrado'}), 404
+
+    user = User.query.get(payment.user_id)
+    subscription = Subscription.query.get(payment.subscription_id)
+
+    return jsonify({
+        'id': payment.id,
+        'stripe_invoice_id': payment.stripe_invoice_id,
+        'stripe_payment_intent_id': payment.stripe_payment_intent_id,
+        'amount': float(payment.amount) if payment.amount else 0,
+        'currency': payment.currency,
+        'status': payment.status,
+        'paid_at': payment.paid_at.isoformat() if payment.paid_at else None,
+        'period_start': payment.period_start.isoformat() if payment.period_start else None,
+        'period_end': payment.period_end.isoformat() if payment.period_end else None,
+        'created_at': payment.created_at.isoformat() if payment.created_at else None,
+        'updated_at': payment.updated_at.isoformat() if payment.updated_at else None,
+        'company': {
+            'id': user.id if user else None,
+            'name': user.name if user else None,
+            'email': user.email if user else None,
+            'company_name': user.company_name if user else None
+        },
+        'subscription': {
+            'id': subscription.id if subscription else None,
+            'plan': subscription.plan if subscription else None,
+            'status': subscription.status if subscription else None,
+            'stripe_subscription_id': subscription.stripe_subscription_id if subscription else None
+        }
+    }), 200
+
+
+@superadmin_bp.route('/payments/stats', methods=['GET'])
+@jwt_required()
+@admin_required
+def get_payments_stats():
+    """
+    Obtém estatísticas de faturamento.
+    ---
+    tags:
+      - Super Admin - Payments
+    security:
+      - Bearer: []
+    parameters:
+      - name: months
+        in: query
+        type: integer
+        default: 12
+        description: Número de meses para análise
+    responses:
+      200:
+        description: Estatísticas de faturamento
+    """
+    months = request.args.get('months', 12, type=int)
+
+    # Total faturado
+    total_revenue = db.session.query(func.sum(Payment.amount)).filter(
+        Payment.status == 'paid'
+    ).scalar() or 0
+
+    # Total de pagamentos
+    total_payments = Payment.query.filter(Payment.status == 'paid').count()
+
+    # Faturamento por mês
+    monthly_data = []
+    for i in range(months - 1, -1, -1):
+        month_start = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0) - timedelta(days=i * 30)
+        month_end = month_start + timedelta(days=30)
+
+        month_revenue = db.session.query(func.sum(Payment.amount)).filter(
+            Payment.status == 'paid',
+            Payment.paid_at >= month_start,
+            Payment.paid_at < month_end
+        ).scalar() or 0
+
+        month_count = Payment.query.filter(
+            Payment.status == 'paid',
+            Payment.paid_at >= month_start,
+            Payment.paid_at < month_end
+        ).count()
+
+        monthly_data.append({
+            'month': month_start.strftime('%Y-%m'),
+            'revenue': float(month_revenue),
+            'count': month_count
+        })
+
+    # Faturamento dos últimos 30 dias
+    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+    last_30_days_revenue = db.session.query(func.sum(Payment.amount)).filter(
+        Payment.status == 'paid',
+        Payment.paid_at >= thirty_days_ago
+    ).scalar() or 0
+
+    last_30_days_count = Payment.query.filter(
+        Payment.status == 'paid',
+        Payment.paid_at >= thirty_days_ago
+    ).count()
+
+    return jsonify({
+        'total_revenue': float(total_revenue),
+        'total_payments': total_payments,
+        'last_30_days': {
+            'revenue': float(last_30_days_revenue),
+            'count': last_30_days_count
+        },
+        'monthly': monthly_data
     }), 200
