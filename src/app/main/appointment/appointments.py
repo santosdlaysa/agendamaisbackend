@@ -86,13 +86,13 @@ def get_appointments():
                 return jsonify(message='Formato de data inválido. Use YYYY-MM-DD'), 400
         
         if professional_id:
-            query = query.filter(Appointment.professional_id == professional_id)
-        
+            query = query.filter(Appointment.professional_id == int(professional_id))
+
         if client_id:
-            query = query.filter(Appointment.client_id == client_id)
-        
+            query = query.filter(Appointment.client_id == int(client_id))
+
         if service_id:
-            query = query.filter(Appointment.service_id == service_id)
+            query = query.filter(Appointment.service_id == int(service_id))
         
         if status:
             query = query.filter(Appointment.status == status)
@@ -662,10 +662,10 @@ def get_calendar_appointments():
         )
 
         if professional_id:
-            query = query.filter(Appointment.professional_id == professional_id)
-        
+            query = query.filter(Appointment.professional_id == int(professional_id))
+
         appointments = query.order_by(
-            Appointment.appointment_date, 
+            Appointment.appointment_date,
             Appointment.start_time
         ).all()
         
@@ -847,10 +847,10 @@ def get_financial_report():
         
         # Filtros adicionais
         if professional_id:
-            query = query.filter(Appointment.professional_id == professional_id)
-        
+            query = query.filter(Appointment.professional_id == int(professional_id))
+
         if service_id:
-            query = query.filter(Appointment.service_id == service_id)
+            query = query.filter(Appointment.service_id == int(service_id))
         
         # Buscar agendamentos
         completed_appointments = query.order_by(Appointment.appointment_date.desc()).all()
