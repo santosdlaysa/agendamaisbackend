@@ -803,6 +803,115 @@ def create_appointment(slug):
     return jsonify(response_data), 201
 
 
+@public_bp.route('/business/<slug>/clients', methods=['POST', 'OPTIONS'])
+@simple_rate_limit(max_requests=10, window_seconds=60)
+@swag_from({
+    'tags': ['Agendamento Online'],
+    'summary': 'Criar cliente',
+    'description': 'Cria um novo cliente para o estabelecimento',
+    'parameters': [
+        {'name': 'slug', 'in': 'path', 'type': 'string', 'required': True},
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['name', 'phone'],
+                'properties': {
+                    'name': {'type': 'string', 'example': 'Maria Santos'},
+                    'phone': {'type': 'string', 'example': '(11) 99999-9999'},
+                    'email': {'type': 'string', 'example': 'maria@email.com'},
+                    'notes': {'type': 'string', 'example': 'Observação'}
+                }
+            }
+        }
+    ],
+    'responses': {
+        201: {'description': 'Cliente criado com sucesso'},
+        200: {'description': 'Cliente já existe'},
+        400: {'description': 'Dados inválidos'}
+    }
+})
+def create_client_public(slug):
+    """Cria ou retorna cliente existente para o estabelecimento"""
+    # Handle CORS preflight
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    user, error = get_business_or_404(slug)
+    if error:
+        return jsonify(error[0]), error[1]
+
+    data = request.json
+
+    # Validar dados obrigatórios
+    if not data.get('name') or not data.get('phone'):
+        return jsonify({'error': 'Nome e telefone são obrigatórios'}), 400
+
+    # Verificar se cliente já existe pelo telefone
+    client = Client.query.filter_by(
+        phone=data['phone'],
+        user_id=user.id
+    ).first()
+
+    if client:
+        # Atualizar dados se necessário
+        updated = False
+        if data.get('name') and client.name != data['name']:
+            client.name = data['name']
+            updated = True
+        if data.get('email') and not client.email:
+            client.email = data['email']
+            updated = True
+        if data.get('notes') and not client.notes:
+            client.notes = data['notes']
+            updated = True
+
+        if updated:
+            db.session.commit()
+
+        return jsonify({
+            'message': 'Cliente já cadastrado',
+            'client': {
+                'id': client.id,
+                'name': client.name,
+                'phone': client.phone,
+                'email': client.email
+            },
+            'existing': True
+        }), 200
+
+    # Criar novo cliente
+    client = Client(
+        name=data['name'],
+        phone=data['phone'],
+        email=data.get('email'),
+        notes=data.get('notes'),
+        user_id=user.id
+    )
+    db.session.add(client)
+
+    # Criar notificação in-app para o dashboard
+    try:
+        Notification.notify_new_client(user_id=user.id, client=client)
+    except Exception as e:
+        print(f"Erro ao criar notificacao in-app: {str(e)}")
+
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Cliente criado com sucesso',
+        'client': {
+            'id': client.id,
+            'name': client.name,
+            'phone': client.phone,
+            'email': client.email
+        },
+        'existing': False
+    }), 201
+
+
 @public_bp.route('/appointments/<code>', methods=['GET'])
 @simple_rate_limit(max_requests=30, window_seconds=60)
 @swag_from({
