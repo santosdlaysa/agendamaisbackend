@@ -16,6 +16,7 @@ from src.app.main.public.booking import public_bp
 from src.app.main.professional_portal.professional_auth import professional_auth_bp
 from src.app.main.professional_portal.professional_dashboard import professional_dashboard_bp
 from src.app.main.superadmin.superadmin import superadmin_bp
+from src.app.main.notifications.notifications import notifications_bp
 # Import reminder blueprint conditionally
 try:
     from src.app.main.reminder.reminders import reminders_bp
@@ -241,6 +242,9 @@ def create_app():
 
     # Super Admin
     app.register_blueprint(superadmin_bp, url_prefix='/api/superadmin')
+
+    # Notificacoes In-App
+    app.register_blueprint(notifications_bp, url_prefix='/api/notifications')
 
     # Register reminder blueprint if available
     if REMINDERS_AVAILABLE and reminders_bp:

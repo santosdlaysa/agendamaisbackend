@@ -9,6 +9,7 @@ from src.models.service import Service
 from src.models.client import Client
 from src.models.appointment import Appointment, generate_booking_code
 from src.models.working_hours import WorkingHours, ProfessionalBlockedDate
+from src.models.notification import Notification
 from src.services.notification_service import NotificationService
 
 public_bp = Blueprint('public', __name__)
@@ -722,6 +723,24 @@ def create_appointment(slug):
         confirmation_token = appointment.generate_confirmation_token()
 
     db.session.add(appointment)
+
+    # Criar notificacao in-app para o dashboard do admin
+    try:
+        Notification.notify_new_appointment(
+            user_id=user.id,
+            appointment=appointment,
+            client=client,
+            service=service,
+            professional=professional
+        )
+
+        # Se cliente foi criado agora (novo cliente), criar notificacao de novo cliente
+        is_new_client = client.created_at and (datetime.now() - client.created_at).total_seconds() < 60
+        if is_new_client:
+            Notification.notify_new_client(user_id=user.id, client=client)
+    except Exception as e:
+        print(f"Erro ao criar notificacao in-app: {str(e)}")
+
     db.session.commit()
 
     response_data = {
@@ -735,7 +754,7 @@ def create_appointment(slug):
         response_data['confirmation_token'] = confirmation_token
         response_data['message'] = 'Agendamento criado. Confirme através do link enviado.'
 
-    # Enviar notificacoes de agendamento criado
+    # Enviar notificacoes de agendamento criado (email/whatsapp)
     try:
         business_name = user.business_name or user.name
         booking_url = None
@@ -901,6 +920,18 @@ def confirm_appointment(token):
     if not result['success']:
         return jsonify({'error': result['error']}), 400
 
+    # Criar notificacao in-app para o dashboard do admin
+    try:
+        user = User.query.get(appointment.user_id) if appointment.user_id else None
+        if user and appointment.client:
+            Notification.notify_appointment_confirmed(
+                user_id=user.id,
+                appointment=appointment,
+                client=appointment.client
+            )
+    except Exception as e:
+        print(f"Erro ao criar notificacao in-app de confirmacao: {str(e)}")
+
     db.session.commit()
 
     response_data = {
@@ -908,7 +939,7 @@ def confirm_appointment(token):
         'appointment': appointment.to_public_dict()
     }
 
-    # Enviar notificacao de confirmacao
+    # Enviar notificacao de confirmacao (email/whatsapp)
     try:
         client = appointment.client
         professional = appointment.professional
@@ -988,6 +1019,19 @@ def cancel_appointment(code):
         }), 400
 
     appointment.status = 'cancelled'
+
+    # Criar notificacao in-app para o dashboard do admin
+    try:
+        if user and appointment.client:
+            Notification.notify_appointment_cancelled(
+                user_id=user.id,
+                appointment=appointment,
+                client=appointment.client,
+                reason='Cancelamento solicitado pelo cliente online'
+            )
+    except Exception as e:
+        print(f"Erro ao criar notificacao in-app de cancelamento: {str(e)}")
+
     db.session.commit()
 
     response_data = {
@@ -995,7 +1039,7 @@ def cancel_appointment(code):
         'appointment': appointment.to_public_dict()
     }
 
-    # Enviar notificacao de cancelamento
+    # Enviar notificacao de cancelamento (email/whatsapp)
     try:
         client = appointment.client
         service = appointment.service

@@ -3,6 +3,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from flasgger import swag_from
 from src.models.user import db, User
 from src.models.client import Client
+from src.models.notification import Notification
 from src.services.notification_service import NotificationService
 
 clients_bp = Blueprint('clients', __name__)
@@ -203,9 +204,16 @@ def create_client():
         )
 
         db.session.add(client)
+
+        # Criar notificacao in-app para o dashboard
+        try:
+            Notification.notify_new_client(user_id=user_id, client=client)
+        except Exception as e:
+            print(f"Erro ao criar notificacao in-app: {str(e)}")
+
         db.session.commit()
 
-        # Enviar notificacao de boas-vindas para novo cliente
+        # Enviar notificacao de boas-vindas para novo cliente (email/whatsapp)
         notification_results = {}
         send_notification = data.get('send_notification', True)
 

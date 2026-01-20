@@ -6,6 +6,7 @@ from src.models.appointment import Appointment
 from src.models.client import Client
 from src.models.professional import Professional
 from src.models.service import Service
+from src.models.notification import Notification
 from datetime import datetime, date, time, timedelta
 from src.services.notification_service import NotificationService
 # Import reminder scheduler conditionally
@@ -263,8 +264,21 @@ def create_appointment():
         )
         
         db.session.add(appointment)
+
+        # Criar notificacao in-app para o dashboard
+        try:
+            Notification.notify_new_appointment(
+                user_id=user_id,
+                appointment=appointment,
+                client=client,
+                service=service,
+                professional=professional
+            )
+        except Exception as e:
+            print(f"Erro ao criar notificacao in-app: {str(e)}")
+
         db.session.commit()
-        
+
         response_data = {
             'message': 'Agendamento criado com sucesso',
             'appointment': appointment.to_dict_detailed()
@@ -560,6 +574,17 @@ def update_appointment_status(appointment_id):
             completion_info = appointment.complete_appointment()
             appointment.notes = data.get('notes', appointment.notes)
 
+            # Criar notificacao in-app de conclusao
+            try:
+                Notification.notify_appointment_completed(
+                    user_id=user_id,
+                    appointment=appointment,
+                    client=appointment.client,
+                    service=appointment.service
+                )
+            except Exception as e:
+                print(f"Erro ao criar notificacao in-app de conclusao: {str(e)}")
+
             db.session.commit()
 
             response_data = {
@@ -568,7 +593,7 @@ def update_appointment_status(appointment_id):
                 'calculation': completion_info
             }
 
-            # Enviar notificacao de conclusao
+            # Enviar notificacao de conclusao (email/whatsapp)
             send_notification = data.get('send_notification', True)
             client = appointment.client
             if send_notification and client and (client.email or client.phone):
@@ -603,6 +628,25 @@ def update_appointment_status(appointment_id):
         if 'payment_method' in data and data['payment_method'] is not None:
             appointment.payment_method = data['payment_method']
 
+        # Criar notificacoes in-app baseadas na mudanca de status
+        try:
+            if new_status == 'confirmed' and old_status != 'confirmed':
+                Notification.notify_appointment_confirmed(
+                    user_id=user_id,
+                    appointment=appointment,
+                    client=appointment.client
+                )
+            elif new_status == 'cancelled' and old_status != 'cancelled':
+                reason = data.get('cancellation_reason') or data.get('notes')
+                Notification.notify_appointment_cancelled(
+                    user_id=user_id,
+                    appointment=appointment,
+                    client=appointment.client,
+                    reason=reason
+                )
+        except Exception as e:
+            print(f"Erro ao criar notificacao in-app: {str(e)}")
+
         db.session.commit()
 
         response_data = {
@@ -610,7 +654,7 @@ def update_appointment_status(appointment_id):
             'appointment': appointment.to_dict_detailed()
         }
 
-        # Enviar notificacoes baseadas na mudanca de status
+        # Enviar notificacoes baseadas na mudanca de status (email/whatsapp)
         send_notification = data.get('send_notification', True)
         client = appointment.client
         if send_notification and client and (client.email or client.phone):
