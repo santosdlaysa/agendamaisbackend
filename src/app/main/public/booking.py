@@ -9,6 +9,7 @@ from src.models.service import Service
 from src.models.client import Client
 from src.models.appointment import Appointment, generate_booking_code
 from src.models.working_hours import WorkingHours, ProfessionalBlockedDate
+from src.services.notification_service import NotificationService
 
 public_bp = Blueprint('public', __name__)
 
@@ -734,6 +735,52 @@ def create_appointment(slug):
         response_data['confirmation_token'] = confirmation_token
         response_data['message'] = 'Agendamento criado. Confirme através do link enviado.'
 
+    # Enviar notificacoes de agendamento criado
+    try:
+        business_name = user.business_name or user.name
+        booking_url = None
+        if user.slug:
+            booking_url = f"https://agendamais.site/agendar/{user.slug}"
+
+        # Determinar canais de notificacao (email e whatsapp por padrao)
+        channels = ['email', 'whatsapp']
+
+        notification_results = NotificationService.send_appointment_created_notification(
+            appointment=appointment,
+            client=client,
+            professional=professional,
+            service=service,
+            business_name=business_name,
+            booking_code=booking_code,
+            booking_url=booking_url,
+            channels=channels
+        )
+
+        # Adicionar resultados de notificacao na resposta
+        response_data['notifications'] = {
+            k: v.to_dict() if hasattr(v, 'to_dict') else v
+            for k, v in notification_results.items()
+        }
+
+        # Se cliente foi criado agora, enviar notificacao de boas-vindas tambem
+        if client.created_at and (datetime.utcnow() - client.created_at).total_seconds() < 60:
+            try:
+                welcome_results = NotificationService.send_new_client_notification(
+                    client=client,
+                    business_name=business_name,
+                    booking_url=booking_url,
+                    channels=['email']  # Apenas email para boas-vindas
+                )
+                response_data['welcome_notification'] = {
+                    k: v.to_dict() if hasattr(v, 'to_dict') else v
+                    for k, v in welcome_results.items()
+                }
+            except Exception:
+                pass  # Erro de boas-vindas nao deve impedir resposta
+    except Exception as e:
+        # Erro de notificacao nao deve impedir criacao do agendamento
+        response_data['notification_warning'] = f'Agendamento criado, mas notificacao falhou: {str(e)}'
+
     return jsonify(response_data), 201
 
 
@@ -856,10 +903,36 @@ def confirm_appointment(token):
 
     db.session.commit()
 
-    return jsonify({
+    response_data = {
         'message': result['message'],
         'appointment': appointment.to_public_dict()
-    }), 200
+    }
+
+    # Enviar notificacao de confirmacao
+    try:
+        client = appointment.client
+        professional = appointment.professional
+        service = appointment.service
+        user = User.query.get(appointment.user_id) if appointment.user_id else None
+        business_name = user.business_name or user.name if user else 'Agenda+'
+
+        if client and (client.email or client.phone):
+            notification_results = NotificationService.send_appointment_confirmed_notification(
+                appointment=appointment,
+                client=client,
+                professional=professional,
+                service=service,
+                business_name=business_name,
+                channels=['email', 'whatsapp']
+            )
+            response_data['notifications'] = {
+                k: v.to_dict() if hasattr(v, 'to_dict') else v
+                for k, v in notification_results.items()
+            }
+    except Exception as e:
+        response_data['notification_warning'] = f'Agendamento confirmado, mas notificacao falhou: {str(e)}'
+
+    return jsonify(response_data), 200
 
 
 @public_bp.route('/appointments/<code>/cancel', methods=['PUT'])
@@ -917,7 +990,33 @@ def cancel_appointment(code):
     appointment.status = 'cancelled'
     db.session.commit()
 
-    return jsonify({
+    response_data = {
         'message': 'Agendamento cancelado com sucesso',
         'appointment': appointment.to_public_dict()
-    }), 200
+    }
+
+    # Enviar notificacao de cancelamento
+    try:
+        client = appointment.client
+        service = appointment.service
+        business_name = user.business_name or user.name if user else 'Agenda+'
+        booking_url = f"https://agendamais.site/agendar/{user.slug}" if user and user.slug else None
+
+        if client and (client.email or client.phone):
+            notification_results = NotificationService.send_appointment_cancelled_notification(
+                appointment=appointment,
+                client=client,
+                service=service,
+                business_name=business_name,
+                reason='Cancelamento solicitado pelo cliente',
+                booking_url=booking_url,
+                channels=['email', 'whatsapp']
+            )
+            response_data['notifications'] = {
+                k: v.to_dict() if hasattr(v, 'to_dict') else v
+                for k, v in notification_results.items()
+            }
+    except Exception as e:
+        response_data['notification_warning'] = f'Agendamento cancelado, mas notificacao falhou: {str(e)}'
+
+    return jsonify(response_data), 200
