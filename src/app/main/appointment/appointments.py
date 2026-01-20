@@ -1,12 +1,13 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from flasgger import swag_from
-from src.models.user import db
+from src.models.user import db, User
 from src.models.appointment import Appointment
 from src.models.client import Client
 from src.models.professional import Professional
 from src.models.service import Service
 from datetime import datetime, date, time, timedelta
+from src.services.notification_service import NotificationService
 # Import reminder scheduler conditionally
 try:
     from src.services.reminder_scheduler import reminder_scheduler
@@ -14,6 +15,19 @@ try:
 except ImportError:
     reminder_scheduler = None
     REMINDER_SCHEDULER_AVAILABLE = False
+
+
+def get_business_info(user_id):
+    """Obtem informacoes da empresa para notificacoes"""
+    user = User.query.get(user_id)
+    if not user:
+        return 'Agenda+', None
+    business_name = user.business_name or user.name
+    booking_url = None
+    if user.slug and user.online_booking_enabled:
+        frontend_url = 'https://agendamais.site'
+        booking_url = f"{frontend_url}/agendar/{user.slug}"
+    return business_name, booking_url
 
 appointments_bp = Blueprint('appointments', __name__)
 
@@ -255,12 +269,12 @@ def create_appointment():
             'message': 'Agendamento criado com sucesso',
             'appointment': appointment.to_dict_detailed()
         }
-        
+
         # Criar lembretes automáticos para o agendamento se disponível
         if REMINDER_SCHEDULER_AVAILABLE and reminder_scheduler:
             try:
                 reminder_result = reminder_scheduler.create_reminders_for_appointment(appointment.id)
-                
+
                 # Incluir informações dos lembretes criados
                 if reminder_result['success']:
                     response_data['reminders_created'] = reminder_result['reminders_created']
@@ -269,7 +283,28 @@ def create_appointment():
                     response_data['reminder_warning'] = f"Agendamento criado, mas houve problema ao criar lembretes: {reminder_result['error']}"
             except Exception as e:
                 response_data['reminder_warning'] = f"Agendamento criado, mas lembretes não puderam ser criados: {str(e)}"
-        
+
+        # Enviar notificacao de agendamento criado
+        send_notification = data.get('send_notification', True)
+        if send_notification and (client.email or client.phone):
+            try:
+                business_name, booking_url = get_business_info(user_id)
+                channels = data.get('notification_channels', ['email', 'whatsapp'])
+
+                notification_results = NotificationService.send_appointment_created_notification(
+                    appointment=appointment,
+                    client=client,
+                    professional=professional,
+                    service=service,
+                    business_name=business_name,
+                    booking_code=appointment.booking_code,
+                    booking_url=booking_url,
+                    channels=channels
+                )
+                response_data['notifications'] = {k: v.to_dict() if hasattr(v, 'to_dict') else v for k, v in notification_results.items()}
+            except Exception as e:
+                response_data['notification_warning'] = f"Agendamento criado, mas notificacao falhou: {str(e)}"
+
         return jsonify(**response_data), 201
         
     except Exception as e:
@@ -364,7 +399,12 @@ def update_appointment(appointment_id):
         # Verificar conflitos de horário (excluindo o agendamento atual)
         if Appointment.check_conflict(professional.id, appointment_date, start_time, end_time, appointment.id):
             return jsonify(message='Conflito de horário detectado. Profissional já possui agendamento neste horário'), 400
-        
+
+        # Guardar dados antigos para notificacao de reagendamento
+        old_date = appointment.appointment_date
+        old_time = appointment.start_time
+        date_changed = old_date != appointment_date or old_time != start_time
+
         # Atualizar agendamento
         appointment.client_id = client.id
         appointment.professional_id = professional.id
@@ -376,13 +416,36 @@ def update_appointment(appointment_id):
         appointment.notes = data.get('notes', appointment.notes)
         appointment.price = data.get('price', service.price)
         appointment.payment_method = data.get('payment_method', appointment.payment_method)
-        
+
         db.session.commit()
-        
-        return jsonify(
-            message='Agendamento atualizado com sucesso',
-            appointment=appointment.to_dict_detailed()
-        ), 200
+
+        response_data = {
+            'message': 'Agendamento atualizado com sucesso',
+            'appointment': appointment.to_dict_detailed()
+        }
+
+        # Enviar notificacao de reagendamento se data/horario mudou
+        send_notification = data.get('send_notification', True)
+        if send_notification and date_changed and (client.email or client.phone):
+            try:
+                business_name, _ = get_business_info(user_id)
+                channels = data.get('notification_channels', ['email', 'whatsapp'])
+
+                notification_results = NotificationService.send_appointment_rescheduled_notification(
+                    appointment=appointment,
+                    client=client,
+                    professional=professional,
+                    service=service,
+                    business_name=business_name,
+                    old_date=old_date,
+                    old_time=old_time,
+                    channels=channels
+                )
+                response_data['notifications'] = {k: v.to_dict() if hasattr(v, 'to_dict') else v for k, v in notification_results.items()}
+            except Exception as e:
+                response_data['notification_warning'] = f"Agendamento atualizado, mas notificacao falhou: {str(e)}"
+
+        return jsonify(**response_data), 200
         
     except Exception as e:
         db.session.rollback()
@@ -489,37 +552,101 @@ def update_appointment_status(appointment_id):
         if new_status not in valid_statuses:
             return jsonify(message=f'Status inválido. Use: {", ".join(valid_statuses)}'), 400
         
+        # Guardar status antigo para notificacao
+        old_status = appointment.status
+
         # Se o status for 'completed', usar função específica para calcular valores
         if new_status == 'completed':
             completion_info = appointment.complete_appointment()
             appointment.notes = data.get('notes', appointment.notes)
-            
+
             db.session.commit()
-            
-            return jsonify(
-                message='Agendamento concluído com sucesso',
-                appointment=appointment.to_dict_detailed(),
-                calculation=completion_info
-            ), 200
-        
+
+            response_data = {
+                'message': 'Agendamento concluído com sucesso',
+                'appointment': appointment.to_dict_detailed(),
+                'calculation': completion_info
+            }
+
+            # Enviar notificacao de conclusao
+            send_notification = data.get('send_notification', True)
+            client = appointment.client
+            if send_notification and client and (client.email or client.phone):
+                try:
+                    business_name, booking_url = get_business_info(user_id)
+                    channels = data.get('notification_channels', ['email', 'whatsapp'])
+
+                    notification_results = NotificationService.send_appointment_completed_notification(
+                        appointment=appointment,
+                        client=client,
+                        professional=appointment.professional,
+                        service=appointment.service,
+                        business_name=business_name,
+                        booking_url=booking_url,
+                        channels=channels
+                    )
+                    response_data['notifications'] = {k: v.to_dict() if hasattr(v, 'to_dict') else v for k, v in notification_results.items()}
+                except Exception as e:
+                    response_data['notification_warning'] = f"Agendamento concluido, mas notificacao falhou: {str(e)}"
+
+            return jsonify(**response_data), 200
+
         # Para outros status, atualização normal
         appointment.status = new_status
         appointment.notes = data.get('notes', appointment.notes)
-        
+
         # Permitir override manual do preço
         if 'price' in data and data['price'] is not None:
             appointment.price = data['price']
-        
+
         # Permitir definir forma de pagamento
         if 'payment_method' in data and data['payment_method'] is not None:
             appointment.payment_method = data['payment_method']
-        
+
         db.session.commit()
-        
-        return jsonify(
-            message=f'Status do agendamento atualizado para {new_status}',
-            appointment=appointment.to_dict_detailed()
-        ), 200
+
+        response_data = {
+            'message': f'Status do agendamento atualizado para {new_status}',
+            'appointment': appointment.to_dict_detailed()
+        }
+
+        # Enviar notificacoes baseadas na mudanca de status
+        send_notification = data.get('send_notification', True)
+        client = appointment.client
+        if send_notification and client and (client.email or client.phone):
+            try:
+                business_name, booking_url = get_business_info(user_id)
+                channels = data.get('notification_channels', ['email', 'whatsapp'])
+
+                notification_results = {}
+
+                if new_status == 'confirmed' and old_status != 'confirmed':
+                    notification_results = NotificationService.send_appointment_confirmed_notification(
+                        appointment=appointment,
+                        client=client,
+                        professional=appointment.professional,
+                        service=appointment.service,
+                        business_name=business_name,
+                        channels=channels
+                    )
+                elif new_status == 'cancelled' and old_status != 'cancelled':
+                    reason = data.get('cancellation_reason') or data.get('notes')
+                    notification_results = NotificationService.send_appointment_cancelled_notification(
+                        appointment=appointment,
+                        client=client,
+                        service=appointment.service,
+                        business_name=business_name,
+                        reason=reason,
+                        booking_url=booking_url,
+                        channels=channels
+                    )
+
+                if notification_results:
+                    response_data['notifications'] = {k: v.to_dict() if hasattr(v, 'to_dict') else v for k, v in notification_results.items()}
+            except Exception as e:
+                response_data['notification_warning'] = f"Status atualizado, mas notificacao falhou: {str(e)}"
+
+        return jsonify(**response_data), 200
         
     except Exception as e:
         db.session.rollback()
@@ -604,13 +731,38 @@ def complete_appointment(appointment_id):
             'date': appointment.appointment_date.isoformat(),
             'time': f"{appointment.start_time.strftime('%H:%M')} - {appointment.end_time.strftime('%H:%M')}"
         }
-        
-        return jsonify(
-            message='Agendamento concluído com sucesso e valores calculados',
-            appointment=appointment.to_dict_detailed(),
-            calculation=completion_info,
-            service_details=service_stats
-        ), 200
+
+        response_data = {
+            'message': 'Agendamento concluído com sucesso e valores calculados',
+            'appointment': appointment.to_dict_detailed(),
+            'calculation': completion_info,
+            'service_details': service_stats
+        }
+
+        # Enviar notificacao de conclusao
+        send_notification = data.get('send_notification', True)
+        client = appointment.client
+        if send_notification and client and (client.email or client.phone):
+            try:
+                business_name, booking_url = get_business_info(user_id)
+                channels = data.get('notification_channels', ['email', 'whatsapp'])
+
+                notification_results = NotificationService.send_appointment_completed_notification(
+                    appointment=appointment,
+                    client=client,
+                    professional=appointment.professional,
+                    service=appointment.service,
+                    business_name=business_name,
+                    price=float(appointment.price) if appointment.price else None,
+                    payment_method=appointment.payment_method,
+                    booking_url=booking_url,
+                    channels=channels
+                )
+                response_data['notifications'] = {k: v.to_dict() if hasattr(v, 'to_dict') else v for k, v in notification_results.items()}
+            except Exception as e:
+                response_data['notification_warning'] = f"Agendamento concluido, mas notificacao falhou: {str(e)}"
+
+        return jsonify(**response_data), 200
         
     except Exception as e:
         db.session.rollback()
