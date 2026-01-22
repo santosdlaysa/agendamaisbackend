@@ -17,12 +17,12 @@ class TestNotificationMessages:
         message = create_new_client_message(
             client_name='Maria Silva',
             business_name='Salao Exemplo',
-            booking_url='https://agendamais.site/agendar/salao-exemplo'
+            booking_url='https://agendarmais.com/agendar/salao-exemplo'
         )
 
         assert 'Maria Silva' in message
         assert 'Salao Exemplo' in message
-        assert 'https://agendamais.site/agendar/salao-exemplo' in message
+        assert 'https://agendarmais.com/agendar/salao-exemplo' in message
         assert 'cadastro' in message.lower()
 
     def test_create_new_client_message_without_url(self):

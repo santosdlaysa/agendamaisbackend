@@ -41,6 +41,13 @@ class Appointment(db.Model):
     confirmation_token_expires = db.Column(db.DateTime, nullable=True)
     confirmed_at = db.Column(db.DateTime, nullable=True)
     confirmation_sent_at = db.Column(db.DateTime, nullable=True)
+
+    # Campos para tracking de pagamento
+    payment_status = db.Column(db.String(20), default='pending')  # 'pending', 'paid', 'refunded', 'failed'
+    stripe_checkout_session_id = db.Column(db.String(100), nullable=True)
+    stripe_payment_intent_id = db.Column(db.String(100), nullable=True)
+    amount_paid = db.Column(db.Numeric(10, 2), nullable=True)
+    payment_completed_at = db.Column(db.DateTime, nullable=True)
     
     def to_dict(self):
         """Converte o objeto para dicionário"""
@@ -60,6 +67,9 @@ class Appointment(db.Model):
             'reminder_sent': self.reminder_sent,
             'booking_code': self.booking_code,
             'source': self.source,
+            'payment_status': self.payment_status,
+            'amount_paid': float(self.amount_paid) if self.amount_paid else None,
+            'payment_completed_at': self.payment_completed_at.isoformat() if self.payment_completed_at else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'client': self.client.to_dict() if hasattr(self, 'client') and self.client else None,
@@ -102,6 +112,8 @@ class Appointment(db.Model):
             'start_time': self.start_time.strftime('%H:%M') if self.start_time else None,
             'end_time': self.end_time.strftime('%H:%M') if self.end_time else None,
             'status': self.status,
+            'payment_status': self.payment_status,
+            'amount_paid': float(self.amount_paid) if self.amount_paid else None,
             'professional': professional_data,
             'service': service_data,
             'client': client_data
@@ -171,7 +183,7 @@ class Appointment(db.Model):
         query = Appointment.query.filter(
             Appointment.professional_id == professional_id,
             Appointment.appointment_date == appointment_date,
-            Appointment.status.in_(['scheduled', 'confirmed'])
+            Appointment.status.in_(['scheduled', 'confirmed', 'pending_payment'])
         )
 
         if exclude_appointment_id:

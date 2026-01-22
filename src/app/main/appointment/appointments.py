@@ -26,7 +26,7 @@ def get_business_info(user_id):
     business_name = user.business_name or user.name
     booking_url = None
     if user.slug and user.online_booking_enabled:
-        frontend_url = 'https://agendamais.site'
+        frontend_url = 'https://agendarmais.com'
         booking_url = f"{frontend_url}/agendar/{user.slug}"
     return business_name, booking_url
 

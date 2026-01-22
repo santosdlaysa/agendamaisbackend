@@ -226,7 +226,7 @@ def create_client():
                 # Gerar URL de agendamento online se disponivel
                 booking_url = None
                 if user and user.slug and user.online_booking_enabled:
-                    frontend_url = 'https://agendamais.site'
+                    frontend_url = 'https://agendarmais.com'
                     booking_url = f"{frontend_url}/agendar/{user.slug}"
 
                 # Definir canais de notificacao
