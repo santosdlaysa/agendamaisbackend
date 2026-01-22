@@ -500,3 +500,118 @@ def update_business():
     except Exception as e:
         db.session.rollback()
         return jsonify(message=f'Erro ao atualizar dados da empresa: {str(e)}'), 500
+
+
+@auth_bp.route('/settings/payment', methods=['GET'])
+@jwt_required()
+@swag_from({
+    'tags': ['Autenticação'],
+    'summary': 'Obter configurações de pagamento',
+    'description': 'Retorna as configurações de pagamento do estabelecimento para agendamento online',
+    'security': [{'Bearer': []}],
+    'responses': {
+        200: {
+            'description': 'Configurações de pagamento',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'require_payment': {'type': 'boolean'},
+                    'payment_type': {'type': 'string', 'enum': ['full', 'deposit']},
+                    'deposit_percentage': {'type': 'integer'}
+                }
+            }
+        },
+        401: {'description': 'Token não fornecido ou inválido'},
+        404: {'description': 'Usuário não encontrado'}
+    }
+})
+def get_payment_settings():
+    """Obter configurações de pagamento"""
+    try:
+        user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
+
+        if not user:
+            return jsonify(message='Usuário não encontrado'), 404
+
+        return jsonify({
+            'require_payment': user.booking_require_payment or False,
+            'payment_type': user.booking_payment_type or 'full',
+            'deposit_percentage': user.booking_deposit_percentage or 50
+        }), 200
+
+    except Exception as e:
+        return jsonify(message=f'Erro ao obter configurações de pagamento: {str(e)}'), 500
+
+
+@auth_bp.route('/settings/payment', methods=['PUT'])
+@jwt_required()
+@swag_from({
+    'tags': ['Autenticação'],
+    'summary': 'Atualizar configurações de pagamento',
+    'description': 'Atualiza as configurações de pagamento para agendamento online',
+    'security': [{'Bearer': []}],
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'require_payment': {'type': 'boolean', 'example': True, 'description': 'Exigir pagamento para agendar'},
+                    'payment_type': {'type': 'string', 'enum': ['full', 'deposit'], 'example': 'deposit', 'description': 'Tipo de pagamento: total ou depósito'},
+                    'deposit_percentage': {'type': 'integer', 'example': 50, 'description': 'Porcentagem do depósito (se payment_type for deposit)'}
+                }
+            }
+        }
+    ],
+    'responses': {
+        200: {'description': 'Configurações atualizadas com sucesso'},
+        400: {'description': 'Dados inválidos'},
+        401: {'description': 'Token não fornecido ou inválido'},
+        404: {'description': 'Usuário não encontrado'}
+    }
+})
+def update_payment_settings():
+    """Atualizar configurações de pagamento"""
+    try:
+        data = request.get_json()
+        user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
+
+        if not user:
+            return jsonify(message='Usuário não encontrado'), 404
+
+        # Atualizar require_payment
+        if 'require_payment' in data:
+            user.booking_require_payment = bool(data['require_payment'])
+
+        # Atualizar payment_type
+        if 'payment_type' in data:
+            payment_type = data['payment_type']
+            if payment_type not in ['full', 'deposit']:
+                return jsonify(message='payment_type deve ser "full" ou "deposit"'), 400
+            user.booking_payment_type = payment_type
+
+        # Atualizar deposit_percentage
+        if 'deposit_percentage' in data:
+            deposit_pct = data['deposit_percentage']
+            if not isinstance(deposit_pct, int) or deposit_pct < 1 or deposit_pct > 100:
+                return jsonify(message='deposit_percentage deve ser um inteiro entre 1 e 100'), 400
+            user.booking_deposit_percentage = deposit_pct
+
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Configurações de pagamento atualizadas com sucesso',
+            'payment_settings': {
+                'require_payment': user.booking_require_payment,
+                'payment_type': user.booking_payment_type,
+                'deposit_percentage': user.booking_deposit_percentage
+            }
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify(message=f'Erro ao atualizar configurações de pagamento: {str(e)}'), 500

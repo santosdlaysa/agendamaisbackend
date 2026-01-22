@@ -1,8 +1,10 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from flasgger import swag_from
-from src.models.user import db
+from src.models.user import db, User
 from src.models.client import Client
+from src.models.notification import Notification
+from src.services.notification_service import NotificationService
 
 clients_bp = Blueprint('clients', __name__)
 
@@ -202,11 +204,49 @@ def create_client():
         )
 
         db.session.add(client)
+
+        # Criar notificacao in-app para o dashboard
+        try:
+            Notification.notify_new_client(user_id=user_id, client=client)
+        except Exception as e:
+            print(f"Erro ao criar notificacao in-app: {str(e)}")
+
         db.session.commit()
+
+        # Enviar notificacao de boas-vindas para novo cliente (email/whatsapp)
+        notification_results = {}
+        send_notification = data.get('send_notification', True)
+
+        if send_notification and (client.email or client.phone):
+            try:
+                # Buscar dados da empresa
+                user = User.query.get(user_id)
+                business_name = user.business_name or user.name if user else 'Agenda+'
+
+                # Gerar URL de agendamento online se disponivel
+                booking_url = None
+                if user and user.slug and user.online_booking_enabled:
+                    frontend_url = 'https://agendarmais.com'
+                    booking_url = f"{frontend_url}/agendar/{user.slug}"
+
+                # Definir canais de notificacao
+                channels = data.get('notification_channels', ['email', 'whatsapp'])
+
+                # Enviar notificacao
+                notification_results = NotificationService.send_new_client_notification(
+                    client=client,
+                    business_name=business_name,
+                    booking_url=booking_url,
+                    channels=channels
+                )
+            except Exception as e:
+                # Erro de notificacao nao deve impedir criacao do cliente
+                notification_results = {'error': str(e)}
 
         return jsonify(
             message='Cliente criado com sucesso',
-            client=client.to_dict()
+            client=client.to_dict(),
+            notifications={k: v.to_dict() if hasattr(v, 'to_dict') else v for k, v in notification_results.items()} if notification_results else None
         ), 201
 
     except Exception as e:

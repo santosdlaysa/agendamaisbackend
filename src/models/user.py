@@ -33,6 +33,11 @@ class User(db.Model):
     booking_allow_cancellation = db.Column(db.Boolean, default=True)  # Permitir cancelamento online
     booking_cancellation_min_hours = db.Column(db.Integer, default=2)  # Antecedência mínima para cancelar
 
+    # Configurações de pagamento no agendamento
+    booking_require_payment = db.Column(db.Boolean, default=False)  # Exigir pagamento para agendar
+    booking_payment_type = db.Column(db.String(20), default='full')  # 'full' ou 'deposit'
+    booking_deposit_percentage = db.Column(db.Integer, default=50)  # Porcentagem do depósito
+
     # Verificação de email
     email_verified = db.Column(db.Boolean, default=False)
     email_verification_token = db.Column(db.String(64), nullable=True)
@@ -96,7 +101,10 @@ class User(db.Model):
                 'end_hour': self.booking_end_hour,
                 'require_confirmation': self.booking_require_confirmation,
                 'allow_cancellation': self.booking_allow_cancellation,
-                'cancellation_min_hours': self.booking_cancellation_min_hours
+                'cancellation_min_hours': self.booking_cancellation_min_hours,
+                'require_payment': self.booking_require_payment,
+                'payment_type': self.booking_payment_type,
+                'deposit_percentage': self.booking_deposit_percentage
             },
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
@@ -118,6 +126,9 @@ class User(db.Model):
                 'start_hour': self.booking_start_hour,
                 'end_hour': self.booking_end_hour,
                 'allow_cancellation': self.booking_allow_cancellation,
-                'cancellation_min_hours': self.booking_cancellation_min_hours
+                'cancellation_min_hours': self.booking_cancellation_min_hours,
+                'require_payment': self.booking_require_payment,
+                'payment_type': self.booking_payment_type,
+                'deposit_percentage': self.booking_deposit_percentage
             }
         }

@@ -1,7 +1,8 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flasgger import swag_from
 from datetime import datetime, timedelta, time
 from functools import wraps
+import os
 from src.config.database import db
 from src.models.user import User
 from src.models.professional import Professional
@@ -9,6 +10,10 @@ from src.models.service import Service
 from src.models.client import Client
 from src.models.appointment import Appointment, generate_booking_code
 from src.models.working_hours import WorkingHours, ProfessionalBlockedDate
+from src.models.notification import Notification
+from src.models.service_payment import ServicePayment
+from src.services.notification_service import NotificationService
+from src.services.payment_service import PaymentService
 
 public_bp = Blueprint('public', __name__)
 
@@ -365,7 +370,7 @@ def get_availability(slug):
     existing_appointments = Appointment.query.filter(
         Appointment.professional_id == professional_id,
         Appointment.appointment_date == date,
-        Appointment.status.in_(['scheduled', 'confirmed'])
+        Appointment.status.in_(['scheduled', 'confirmed', 'pending_payment'])
     ).all()
 
     # Gerar slots de horário
@@ -483,7 +488,7 @@ def get_multi_day_availability(slug):
     appointments = Appointment.query.filter(
         Appointment.professional_id == professional_id,
         Appointment.appointment_date.between(start_date, end_date),
-        Appointment.status.in_(['scheduled', 'confirmed'])
+        Appointment.status.in_(['scheduled', 'confirmed', 'pending_payment'])
     ).all()
 
     # Agrupar por data
@@ -699,6 +704,16 @@ def create_appointment(slug):
     while Appointment.query.filter_by(booking_code=booking_code).first():
         booking_code = generate_booking_code()
 
+    # Verificar se pagamento é obrigatório
+    requires_payment = (
+        user.booking_require_payment and
+        service.price and
+        float(service.price) > 0
+    )
+
+    # Determinar status inicial
+    initial_status = 'pending_payment' if requires_payment else 'scheduled'
+
     # Criar agendamento
     appointment = Appointment(
         client_id=client.id,
@@ -707,20 +722,79 @@ def create_appointment(slug):
         appointment_date=appointment_date,
         start_time=start_time,
         end_time=end_time,
-        status='scheduled',
+        status=initial_status,
         notes=data.get('notes'),
         price=service.price,
         booking_code=booking_code,
         source='online',
-        user_id=user.id
+        user_id=user.id,
+        payment_status='pending' if requires_payment else None
     )
 
-    # Gerar token de confirmação se necessário
+    # Gerar token de confirmação se necessário (apenas se não requer pagamento)
     confirmation_token = None
-    if user.booking_require_confirmation:
+    if user.booking_require_confirmation and not requires_payment:
         confirmation_token = appointment.generate_confirmation_token()
 
     db.session.add(appointment)
+    db.session.flush()  # Para obter o ID do agendamento
+
+    # Se requer pagamento, criar sessão de checkout
+    checkout_data = None
+    if requires_payment:
+        frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+        success_url = f"{frontend_url}/agendar/{user.slug}/confirmacao?code={booking_code}&payment=success"
+        cancel_url = f"{frontend_url}/agendar/{user.slug}/confirmacao?code={booking_code}&payment=cancelled"
+
+        checkout_result = PaymentService.create_service_checkout_session(
+            appointment=appointment,
+            user=user,
+            service=service,
+            client=client,
+            success_url=success_url,
+            cancel_url=cancel_url
+        )
+
+        if checkout_result.get('success'):
+            checkout_data = checkout_result
+            appointment.stripe_checkout_session_id = checkout_result.get('session_id')
+
+            # Criar registro de ServicePayment
+            service_payment = ServicePayment(
+                appointment_id=appointment.id,
+                user_id=user.id,
+                client_id=client.id,
+                stripe_checkout_session_id=checkout_result.get('session_id'),
+                amount=checkout_result.get('amount'),
+                currency='BRL',
+                payment_type=checkout_result.get('payment_type'),
+                deposit_percentage=checkout_result.get('deposit_percentage'),
+                status='pending',
+                expires_at=checkout_result.get('expires_at')
+            )
+            db.session.add(service_payment)
+        else:
+            # Se falhar ao criar checkout, ainda cria o agendamento mas sem pagamento
+            appointment.status = 'scheduled'
+            appointment.payment_status = None
+
+    # Criar notificacao in-app para o dashboard do admin
+    try:
+        Notification.notify_new_appointment(
+            user_id=user.id,
+            appointment=appointment,
+            client=client,
+            service=service,
+            professional=professional
+        )
+
+        # Se cliente foi criado agora (novo cliente), criar notificacao de novo cliente
+        is_new_client = client.created_at and (datetime.now() - client.created_at).total_seconds() < 60
+        if is_new_client:
+            Notification.notify_new_client(user_id=user.id, client=client)
+    except Exception as e:
+        print(f"Erro ao criar notificacao in-app: {str(e)}")
+
     db.session.commit()
 
     response_data = {
@@ -729,12 +803,176 @@ def create_appointment(slug):
         'appointment': appointment.to_public_dict()
     }
 
-    if confirmation_token:
+    # Se requer pagamento, adicionar dados do checkout
+    if checkout_data and checkout_data.get('success'):
+        response_data['requires_payment'] = True
+        response_data['checkout_url'] = checkout_data.get('checkout_url')
+        response_data['payment_amount'] = checkout_data.get('amount')
+        response_data['payment_type'] = checkout_data.get('payment_type')
+        if checkout_data.get('deposit_percentage'):
+            response_data['deposit_percentage'] = checkout_data.get('deposit_percentage')
+        response_data['message'] = 'Agendamento criado. Complete o pagamento para confirmar.'
+    elif confirmation_token:
         response_data['requires_confirmation'] = True
         response_data['confirmation_token'] = confirmation_token
         response_data['message'] = 'Agendamento criado. Confirme através do link enviado.'
 
+    # Enviar notificacoes de agendamento criado (email/whatsapp)
+    try:
+        business_name = user.business_name or user.name
+        booking_url = None
+        if user.slug:
+            booking_url = f"https://agendarmais.com/agendar/{user.slug}"
+
+        # Determinar canais de notificacao (email e whatsapp por padrao)
+        channels = ['email', 'whatsapp']
+
+        notification_results = NotificationService.send_appointment_created_notification(
+            appointment=appointment,
+            client=client,
+            professional=professional,
+            service=service,
+            business_name=business_name,
+            booking_code=booking_code,
+            booking_url=booking_url,
+            channels=channels
+        )
+
+        # Adicionar resultados de notificacao na resposta
+        response_data['notifications'] = {
+            k: v.to_dict() if hasattr(v, 'to_dict') else v
+            for k, v in notification_results.items()
+        }
+
+        # Se cliente foi criado agora, enviar notificacao de boas-vindas tambem
+        if client.created_at and (datetime.utcnow() - client.created_at).total_seconds() < 60:
+            try:
+                welcome_results = NotificationService.send_new_client_notification(
+                    client=client,
+                    business_name=business_name,
+                    booking_url=booking_url,
+                    channels=['email']  # Apenas email para boas-vindas
+                )
+                response_data['welcome_notification'] = {
+                    k: v.to_dict() if hasattr(v, 'to_dict') else v
+                    for k, v in welcome_results.items()
+                }
+            except Exception:
+                pass  # Erro de boas-vindas nao deve impedir resposta
+    except Exception as e:
+        # Erro de notificacao nao deve impedir criacao do agendamento
+        response_data['notification_warning'] = f'Agendamento criado, mas notificacao falhou: {str(e)}'
+
     return jsonify(response_data), 201
+
+
+@public_bp.route('/business/<slug>/clients', methods=['POST', 'OPTIONS'])
+@simple_rate_limit(max_requests=10, window_seconds=60)
+@swag_from({
+    'tags': ['Agendamento Online'],
+    'summary': 'Criar cliente',
+    'description': 'Cria um novo cliente para o estabelecimento',
+    'parameters': [
+        {'name': 'slug', 'in': 'path', 'type': 'string', 'required': True},
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['name', 'phone'],
+                'properties': {
+                    'name': {'type': 'string', 'example': 'Maria Santos'},
+                    'phone': {'type': 'string', 'example': '(11) 99999-9999'},
+                    'email': {'type': 'string', 'example': 'maria@email.com'},
+                    'notes': {'type': 'string', 'example': 'Observação'}
+                }
+            }
+        }
+    ],
+    'responses': {
+        201: {'description': 'Cliente criado com sucesso'},
+        200: {'description': 'Cliente já existe'},
+        400: {'description': 'Dados inválidos'}
+    }
+})
+def create_client_public(slug):
+    """Cria ou retorna cliente existente para o estabelecimento"""
+    # Handle CORS preflight
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    user, error = get_business_or_404(slug)
+    if error:
+        return jsonify(error[0]), error[1]
+
+    data = request.json
+
+    # Validar dados obrigatórios
+    if not data.get('name') or not data.get('phone'):
+        return jsonify({'error': 'Nome e telefone são obrigatórios'}), 400
+
+    # Verificar se cliente já existe pelo telefone
+    client = Client.query.filter_by(
+        phone=data['phone'],
+        user_id=user.id
+    ).first()
+
+    if client:
+        # Atualizar dados se necessário
+        updated = False
+        if data.get('name') and client.name != data['name']:
+            client.name = data['name']
+            updated = True
+        if data.get('email') and not client.email:
+            client.email = data['email']
+            updated = True
+        if data.get('notes') and not client.notes:
+            client.notes = data['notes']
+            updated = True
+
+        if updated:
+            db.session.commit()
+
+        return jsonify({
+            'message': 'Cliente já cadastrado',
+            'client': {
+                'id': client.id,
+                'name': client.name,
+                'phone': client.phone,
+                'email': client.email
+            },
+            'existing': True
+        }), 200
+
+    # Criar novo cliente
+    client = Client(
+        name=data['name'],
+        phone=data['phone'],
+        email=data.get('email'),
+        notes=data.get('notes'),
+        user_id=user.id
+    )
+    db.session.add(client)
+
+    # Criar notificação in-app para o dashboard
+    try:
+        Notification.notify_new_client(user_id=user.id, client=client)
+    except Exception as e:
+        print(f"Erro ao criar notificacao in-app: {str(e)}")
+
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Cliente criado com sucesso',
+        'client': {
+            'id': client.id,
+            'name': client.name,
+            'phone': client.phone,
+            'email': client.email
+        },
+        'existing': False
+    }), 201
 
 
 @public_bp.route('/appointments/<code>', methods=['GET'])
@@ -854,12 +1092,50 @@ def confirm_appointment(token):
     if not result['success']:
         return jsonify({'error': result['error']}), 400
 
+    # Criar notificacao in-app para o dashboard do admin
+    try:
+        user = User.query.get(appointment.user_id) if appointment.user_id else None
+        if user and appointment.client:
+            Notification.notify_appointment_confirmed(
+                user_id=user.id,
+                appointment=appointment,
+                client=appointment.client
+            )
+    except Exception as e:
+        print(f"Erro ao criar notificacao in-app de confirmacao: {str(e)}")
+
     db.session.commit()
 
-    return jsonify({
+    response_data = {
         'message': result['message'],
         'appointment': appointment.to_public_dict()
-    }), 200
+    }
+
+    # Enviar notificacao de confirmacao (email/whatsapp)
+    try:
+        client = appointment.client
+        professional = appointment.professional
+        service = appointment.service
+        user = User.query.get(appointment.user_id) if appointment.user_id else None
+        business_name = user.business_name or user.name if user else 'Agenda+'
+
+        if client and (client.email or client.phone):
+            notification_results = NotificationService.send_appointment_confirmed_notification(
+                appointment=appointment,
+                client=client,
+                professional=professional,
+                service=service,
+                business_name=business_name,
+                channels=['email', 'whatsapp']
+            )
+            response_data['notifications'] = {
+                k: v.to_dict() if hasattr(v, 'to_dict') else v
+                for k, v in notification_results.items()
+            }
+    except Exception as e:
+        response_data['notification_warning'] = f'Agendamento confirmado, mas notificacao falhou: {str(e)}'
+
+    return jsonify(response_data), 200
 
 
 @public_bp.route('/appointments/<code>/cancel', methods=['PUT'])
@@ -915,9 +1191,216 @@ def cancel_appointment(code):
         }), 400
 
     appointment.status = 'cancelled'
+
+    # Criar notificacao in-app para o dashboard do admin
+    try:
+        if user and appointment.client:
+            Notification.notify_appointment_cancelled(
+                user_id=user.id,
+                appointment=appointment,
+                client=appointment.client,
+                reason='Cancelamento solicitado pelo cliente online'
+            )
+    except Exception as e:
+        print(f"Erro ao criar notificacao in-app de cancelamento: {str(e)}")
+
+    db.session.commit()
+
+    response_data = {
+        'message': 'Agendamento cancelado com sucesso',
+        'appointment': appointment.to_public_dict()
+    }
+
+    # Enviar notificacao de cancelamento (email/whatsapp)
+    try:
+        client = appointment.client
+        service = appointment.service
+        business_name = user.business_name or user.name if user else 'Agenda+'
+        booking_url = f"https://agendarmais.com/agendar/{user.slug}" if user and user.slug else None
+
+        if client and (client.email or client.phone):
+            notification_results = NotificationService.send_appointment_cancelled_notification(
+                appointment=appointment,
+                client=client,
+                service=service,
+                business_name=business_name,
+                reason='Cancelamento solicitado pelo cliente',
+                booking_url=booking_url,
+                channels=['email', 'whatsapp']
+            )
+            response_data['notifications'] = {
+                k: v.to_dict() if hasattr(v, 'to_dict') else v
+                for k, v in notification_results.items()
+            }
+    except Exception as e:
+        response_data['notification_warning'] = f'Agendamento cancelado, mas notificacao falhou: {str(e)}'
+
+    return jsonify(response_data), 200
+
+
+@public_bp.route('/appointments/<code>/payment', methods=['POST'])
+@simple_rate_limit(max_requests=10, window_seconds=60)
+@swag_from({
+    'tags': ['Agendamento Online'],
+    'summary': 'Criar checkout para agendamento existente',
+    'description': 'Cria uma nova sessão de checkout para um agendamento pendente de pagamento',
+    'parameters': [
+        {'name': 'code', 'in': 'path', 'type': 'string', 'required': True, 'description': 'Código do agendamento'}
+    ],
+    'responses': {
+        200: {'description': 'Checkout criado com sucesso'},
+        400: {'description': 'Agendamento não requer pagamento ou já foi pago'},
+        404: {'description': 'Agendamento não encontrado'}
+    }
+})
+def create_payment_checkout(code):
+    """Cria checkout para agendamento existente que ainda não foi pago"""
+    appointment = Appointment.query.filter_by(booking_code=code.upper()).first()
+
+    if not appointment:
+        return jsonify({'error': 'Agendamento não encontrado'}), 404
+
+    # Verificar se o agendamento está pendente de pagamento
+    if appointment.status != 'pending_payment':
+        if appointment.payment_status == 'paid':
+            return jsonify({'error': 'Este agendamento já foi pago'}), 400
+        return jsonify({'error': 'Este agendamento não requer pagamento'}), 400
+
+    # Buscar dados relacionados
+    user = User.query.get(appointment.user_id)
+    if not user:
+        return jsonify({'error': 'Estabelecimento não encontrado'}), 404
+
+    service = Service.query.get(appointment.service_id)
+    client = Client.query.get(appointment.client_id)
+
+    if not service or not client:
+        return jsonify({'error': 'Dados do agendamento incompletos'}), 400
+
+    # Criar nova sessão de checkout
+    frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+    success_url = f"{frontend_url}/agendar/{user.slug}/confirmacao?code={appointment.booking_code}&payment=success"
+    cancel_url = f"{frontend_url}/agendar/{user.slug}/confirmacao?code={appointment.booking_code}&payment=cancelled"
+
+    checkout_result = PaymentService.create_service_checkout_session(
+        appointment=appointment,
+        user=user,
+        service=service,
+        client=client,
+        success_url=success_url,
+        cancel_url=cancel_url
+    )
+
+    if not checkout_result.get('success'):
+        return jsonify({'error': checkout_result.get('error', 'Erro ao criar checkout')}), 500
+
+    # Atualizar appointment com novo session_id
+    appointment.stripe_checkout_session_id = checkout_result.get('session_id')
+
+    # Criar/atualizar ServicePayment
+    service_payment = ServicePayment(
+        appointment_id=appointment.id,
+        user_id=user.id,
+        client_id=client.id,
+        stripe_checkout_session_id=checkout_result.get('session_id'),
+        amount=checkout_result.get('amount'),
+        currency='BRL',
+        payment_type=checkout_result.get('payment_type'),
+        deposit_percentage=checkout_result.get('deposit_percentage'),
+        status='pending',
+        expires_at=checkout_result.get('expires_at')
+    )
+    db.session.add(service_payment)
     db.session.commit()
 
     return jsonify({
-        'message': 'Agendamento cancelado com sucesso',
-        'appointment': appointment.to_public_dict()
+        'message': 'Checkout criado com sucesso',
+        'checkout_url': checkout_result.get('checkout_url'),
+        'payment_amount': checkout_result.get('amount'),
+        'payment_type': checkout_result.get('payment_type'),
+        'deposit_percentage': checkout_result.get('deposit_percentage'),
+        'booking_code': appointment.booking_code
     }), 200
+
+
+@public_bp.route('/webhook/service-payment', methods=['POST'])
+def webhook_service_payment():
+    """
+    Webhook para receber eventos de pagamento do Stripe.
+    Processa: checkout.session.completed, payment_intent.payment_failed, checkout.session.expired
+    """
+    payload = request.get_data(as_text=True)
+    sig_header = request.headers.get('Stripe-Signature')
+    webhook_secret = os.getenv('STRIPE_SERVICE_WEBHOOK_SECRET')
+
+    if not webhook_secret:
+        print("Warning: STRIPE_SERVICE_WEBHOOK_SECRET not configured")
+        return jsonify({'error': 'Webhook not configured'}), 500
+
+    # Verificar assinatura
+    event = PaymentService.verify_webhook_signature(payload, sig_header, webhook_secret)
+
+    if not event:
+        return jsonify({'error': 'Invalid signature'}), 400
+
+    event_type = event.get('type')
+    data = event.get('data', {}).get('object', {})
+
+    print(f"Received Stripe webhook event: {event_type}")
+
+    try:
+        if event_type == 'checkout.session.completed':
+            # Pagamento completado com sucesso
+            result = PaymentService.handle_service_payment_completed(data)
+
+            if result.get('success'):
+                # Buscar appointment e enviar notificações
+                appointment = Appointment.query.get(result.get('appointment_id'))
+                if appointment:
+                    try:
+                        user = User.query.get(appointment.user_id)
+                        client = appointment.client
+                        service = appointment.service
+                        professional = appointment.professional
+
+                        # Criar notificação in-app
+                        if user:
+                            Notification.notify_appointment_confirmed(
+                                user_id=user.id,
+                                appointment=appointment,
+                                client=client
+                            )
+
+                        # Enviar notificações de confirmação
+                        business_name = user.business_name or user.name if user else 'Agenda+'
+                        if client and (client.email or client.phone):
+                            NotificationService.send_appointment_confirmed_notification(
+                                appointment=appointment,
+                                client=client,
+                                professional=professional,
+                                service=service,
+                                business_name=business_name,
+                                channels=['email', 'whatsapp']
+                            )
+                    except Exception as e:
+                        print(f"Error sending payment confirmation notifications: {str(e)}")
+
+            return jsonify({'status': 'processed', 'result': result}), 200
+
+        elif event_type == 'payment_intent.payment_failed':
+            # Pagamento falhou
+            result = PaymentService.handle_service_payment_failed(data)
+            return jsonify({'status': 'processed', 'result': result}), 200
+
+        elif event_type == 'checkout.session.expired':
+            # Sessão de checkout expirou
+            result = PaymentService.handle_checkout_expired(data)
+            return jsonify({'status': 'processed', 'result': result}), 200
+
+        else:
+            # Evento não tratado
+            return jsonify({'status': 'ignored', 'event_type': event_type}), 200
+
+    except Exception as e:
+        print(f"Error processing webhook: {str(e)}")
+        return jsonify({'error': str(e)}), 500

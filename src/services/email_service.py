@@ -3,7 +3,7 @@ from flask import render_template_string
 import os
 
 resend.api_key = os.getenv("RESEND_API_KEY")
-FROM_EMAIL = os.getenv("RESEND_FROM_EMAIL", "Agenda+ <suporte@agendamais.site>")
+FROM_EMAIL = os.getenv("RESEND_FROM_EMAIL", "Agenda+ <suporte@agendarmais.com>")
 
 VERIFICATION_EMAIL_TEMPLATE = """
 <!DOCTYPE html>

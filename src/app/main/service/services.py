@@ -63,7 +63,7 @@ def get_services():
         # Filtrar por profissional DA EMPRESA
         if professional_id:
             query = query.join(Service.professionals).filter(
-                Professional.id == professional_id,
+                Professional.id == int(professional_id),
                 Professional.user_id == user_id
             )
 
