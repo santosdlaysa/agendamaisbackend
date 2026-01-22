@@ -60,6 +60,8 @@ def create_app():
         'https://agendamais-x19j-32f6fx9yd-santosdlaysas-projects.vercel.app',
         'https://agendamais-x19j.vercel.app',
         'https://agendamais.site',
+        'https://www.agendarmais.com',
+        'https://agendarmais.com',
         os.getenv('FRONTEND_URL')
     ]
 
