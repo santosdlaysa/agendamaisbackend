@@ -400,6 +400,60 @@ def update_company(company_id):
     }), 200
 
 
+@superadmin_bp.route('/companies/<int:company_id>/reset-password', methods=['POST'])
+@jwt_required()
+@admin_required
+def reset_company_password(company_id):
+    """
+    Redefine a senha de uma empresa.
+    ---
+    tags:
+      - Super Admin - Companies
+    security:
+      - Bearer: []
+    parameters:
+      - name: company_id
+        in: path
+        type: integer
+        required: true
+      - name: body
+        in: body
+        schema:
+          type: object
+          required:
+            - new_password
+          properties:
+            new_password:
+              type: string
+              minLength: 6
+    responses:
+      200:
+        description: Senha redefinida com sucesso
+      400:
+        description: Senha invalida
+      404:
+        description: Empresa não encontrada
+    """
+    user = User.query.get(company_id)
+    if not user:
+        return jsonify({'error': 'Empresa não encontrada'}), 404
+
+    data = request.get_json()
+    new_password = data.get('new_password')
+
+    if not new_password or len(new_password) < 6:
+        return jsonify({'error': 'A senha deve ter pelo menos 6 caracteres'}), 400
+
+    user.set_password(new_password)
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Senha redefinida com sucesso',
+        'company_id': company_id,
+        'email': user.email
+    }), 200
+
+
 # ============================================================================
 # SUBSCRIPTIONS (ASSINATURAS)
 # ============================================================================
