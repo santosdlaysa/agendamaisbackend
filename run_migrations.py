@@ -36,7 +36,7 @@ def run_migrations():
 
     database_url = get_database_url()
     migrations_dir = os.path.join(os.path.dirname(__file__), 'migrations')
-    migration_file = os.path.join(migrations_dir, 'add_service_payments.sql')
+    migration_file = os.path.join(migrations_dir, 'add_onboarding_fields.sql')
 
     if not os.path.exists(migration_file):
         print(f"Migration file not found: {migration_file}")

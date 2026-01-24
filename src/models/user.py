@@ -44,6 +44,10 @@ class User(db.Model):
     email_verification_expires = db.Column(db.DateTime, nullable=True)
     email_verified_at = db.Column(db.DateTime, nullable=True)
 
+    # Onboarding obrigatório
+    onboarding_completed = db.Column(db.Boolean, default=False)
+    onboarding_completed_at = db.Column(db.DateTime, nullable=True)
+
     def set_password(self, password):
         """Define a senha do usuário usando hash"""
         self.password_hash = generate_password_hash(password)
@@ -107,7 +111,9 @@ class User(db.Model):
                 'deposit_percentage': self.booking_deposit_percentage
             },
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'onboarding_completed': self.onboarding_completed or False,
+            'onboarding_completed_at': self.onboarding_completed_at.isoformat() if self.onboarding_completed_at else None
         }
 
     def to_public_dict(self):
