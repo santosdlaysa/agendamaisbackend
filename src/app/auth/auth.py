@@ -1,3 +1,5 @@
+import re
+
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from flasgger import swag_from
@@ -46,23 +48,36 @@ def register():
     """Registrar novo usuário"""
     try:
         data = request.get_json()
-        
+
         # Validar dados obrigatórios
-        if not data.get('email') or not data.get('password') or not data.get('name'):
+        email = data.get('email', '').strip()
+        password = data.get('password', '')
+        name = data.get('name', '').strip()
+
+        if not email or not password or not name:
             return jsonify(message='Email, senha e nome são obrigatórios'), 400
-        
+
+        # Validar formato do email
+        email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_regex, email):
+            return jsonify(message='Formato de email inválido'), 400
+
+        # Validar tamanho da senha
+        if len(password) < 6:
+            return jsonify(message='A senha deve ter no mínimo 6 caracteres'), 400
+
         # Verificar se usuário já existe
-        existing_user = User.query.filter_by(email=data['email']).first()
+        existing_user = User.query.filter_by(email=email).first()
         if existing_user:
             return jsonify(message='Email já está em uso'), 400
-        
+
         # Criar novo usuário (role sempre 'user' - admins devem ser promovidos manualmente)
         user = User(
-            email=data['email'],
-            name=data['name'],
+            email=email,
+            name=name,
             role='user'
         )
-        user.set_password(data['password'])
+        user.set_password(password)
 
         # Gerar token de verificação de email
         token = user.generate_email_verification_token()
