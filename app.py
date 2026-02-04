@@ -89,8 +89,15 @@ def create_app():
     db.init_app(app)
 
     # Inicializar SocketIO
+    # Desenvolvimento local: threading (compativel com Flask dev server)
+    # Producao (gunicorn): eventlet
     cors_origins = '*' if os.getenv('FLASK_ENV') == 'development' else allowed_origins
-    async_mode = os.getenv('SOCKETIO_ASYNC_MODE', 'eventlet')
+    if os.getenv('SOCKETIO_ASYNC_MODE'):
+        async_mode = os.getenv('SOCKETIO_ASYNC_MODE')
+    elif os.getenv('FLASK_ENV') == 'development':
+        async_mode = 'threading'
+    else:
+        async_mode = 'eventlet'
     socketio.init_app(
         app,
         cors_allowed_origins=cors_origins,
