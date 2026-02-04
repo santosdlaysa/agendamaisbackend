@@ -90,7 +90,8 @@ def create_app():
 
     # Inicializar SocketIO
     cors_origins = '*' if os.getenv('FLASK_ENV') == 'development' else allowed_origins
-    socketio.init_app(app, cors_allowed_origins=cors_origins, async_mode='eventlet')
+    async_mode = os.getenv('SOCKETIO_ASYNC_MODE', 'eventlet')
+    socketio.init_app(app, cors_allowed_origins=cors_origins, async_mode=async_mode)
 
     # Email is now handled by Resend
 
