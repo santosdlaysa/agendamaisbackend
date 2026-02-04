@@ -2,7 +2,7 @@
 Handlers WebSocket para o chat de suporte em tempo real.
 Namespace: /chat
 """
-from flask import request, session
+from flask import request
 from flask_socketio import emit, join_room, leave_room, disconnect
 from flask_jwt_extended import decode_token
 from src.sockets import socketio
@@ -11,6 +11,11 @@ from src.models.user import User
 from src.models.chat_conversation import ChatConversation
 from src.models.chat_message import ChatMessage
 from datetime import datetime
+
+# Mapeamento sid -> {user_id, role}
+# manage_session=False desabilita flask.session no socketio,
+# entao usamos este dict indexado por sid (unico por conexao)
+_sid_to_user = {}
 
 
 def get_user_from_token(token):
@@ -27,10 +32,11 @@ def get_user_from_token(token):
 
 
 def get_current_ws_user():
-    """Retorna (user_id, role) da sessao WebSocket atual"""
-    user_id = session.get('ws_user_id')
-    role = session.get('ws_user_role')
-    return user_id, role
+    """Retorna (user_id, role) do socket atual via sid"""
+    info = _sid_to_user.get(request.sid)
+    if info:
+        return info['user_id'], info['role']
+    return None, None
 
 
 @socketio.on('connect', namespace='/chat')
@@ -42,18 +48,15 @@ def handle_connect(auth=None):
 
     if not token:
         print(f"[Chat WS] Connection rejected: no token")
-        disconnect()
         return False
 
     user_id, role = get_user_from_token(token)
     if not user_id:
         print(f"[Chat WS] Connection rejected: invalid token")
-        disconnect()
         return False
 
-    # Guardar dados do usuario na sessao do SocketIO
-    session['ws_user_id'] = user_id
-    session['ws_user_role'] = role
+    # Registrar sid -> usuario
+    _sid_to_user[request.sid] = {'user_id': user_id, 'role': role}
 
     # Entrar na room pessoal
     join_room(f'user_{user_id}')
@@ -73,8 +76,9 @@ def handle_connect(auth=None):
 
 @socketio.on('disconnect', namespace='/chat')
 def handle_disconnect():
-    """Log de desconexao"""
-    user_id = session.get('ws_user_id', '?')
+    """Remove usuario e loga desconexao"""
+    info = _sid_to_user.pop(request.sid, None)
+    user_id = info['user_id'] if info else '?'
     print(f"[Chat WS] User {user_id} disconnected, sid={request.sid}")
 
 
