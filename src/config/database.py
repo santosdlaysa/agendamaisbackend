@@ -9,6 +9,7 @@ def run_migrations():
     migrations_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'migrations')
     migration_files = [
         'add_service_payments.sql',
+        'add_support_chat.sql',
     ]
 
     for migration_file in migration_files:

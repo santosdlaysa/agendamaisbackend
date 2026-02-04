@@ -9,6 +9,8 @@ from .professional_user import ProfessionalUser
 from .payment import Payment
 from .notification import Notification
 from .service_payment import ServicePayment
+from .chat_conversation import ChatConversation
+from .chat_message import ChatMessage
 
 # Import reminder models after appointment to avoid circular dependency
 try:

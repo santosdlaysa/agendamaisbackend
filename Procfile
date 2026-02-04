@@ -1,1 +1,1 @@
-web: gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+web: gunicorn --worker-class eventlet -w 1 wsgi:app --bind 0.0.0.0:$PORT --timeout 120

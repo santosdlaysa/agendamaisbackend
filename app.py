@@ -17,6 +17,8 @@ from src.app.main.professional_portal.professional_auth import professional_auth
 from src.app.main.professional_portal.professional_dashboard import professional_dashboard_bp
 from src.app.main.superadmin.superadmin import superadmin_bp
 from src.app.main.notifications.notifications import notifications_bp
+from src.app.main.chat.chat import chat_bp
+from src.sockets import socketio
 # Import reminder blueprint conditionally
 try:
     from src.app.main.reminder.reminders import reminders_bp
@@ -85,6 +87,11 @@ def create_app():
 
     JWTManager(app)
     db.init_app(app)
+
+    # Inicializar SocketIO
+    cors_origins = '*' if os.getenv('FLASK_ENV') == 'development' else allowed_origins
+    socketio.init_app(app, cors_allowed_origins=cors_origins, async_mode='eventlet')
+
     # Email is now handled by Resend
 
     # Configuração do Swagger
@@ -248,6 +255,9 @@ def create_app():
     # Notificacoes In-App
     app.register_blueprint(notifications_bp, url_prefix='/api/notifications')
 
+    # Chat de Suporte
+    app.register_blueprint(chat_bp, url_prefix='/api/chat')
+
     # Register reminder blueprint if available
     if REMINDERS_AVAILABLE and reminders_bp:
         app.register_blueprint(reminders_bp, url_prefix='/api/reminders')
@@ -256,6 +266,9 @@ def create_app():
     @app.route('/health')
     def health_check():
         return {'status': 'healthy', 'service': 'agendamais-api'}, 200
+
+    # Registrar handlers WebSocket do chat
+    import src.sockets.chat_events  # noqa: F401
 
     # Criar tabelas
     with app.app_context():
@@ -268,4 +281,4 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
     debug = os.getenv('FLASK_ENV') == 'development'
     print(f"Starting server on port {port}, debug={debug}")
-    app.run(debug=debug, host='0.0.0.0', port=port)
+    socketio.run(app, debug=debug, host='0.0.0.0', port=port)
