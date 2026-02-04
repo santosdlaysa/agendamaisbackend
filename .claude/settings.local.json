@@ -29,7 +29,8 @@
       "Bash(npm run build:*)",
       "Bash(git push)",
       "Bash(timeout:*)",
-      "Bash(ping:*)"
+      "Bash(ping:*)",
+      "WebSearch"
     ],
     "deny": [],
     "ask": []

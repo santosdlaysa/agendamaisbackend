@@ -23,4 +23,4 @@ resend==2.19.0
 gunicorn==21.2.0
 APScheduler==3.10.4
 flask-socketio==5.3.6
-eventlet==0.36.1
+eventlet==0.39.1
