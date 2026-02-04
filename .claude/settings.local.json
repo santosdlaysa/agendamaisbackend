@@ -30,7 +30,9 @@
       "Bash(git push)",
       "Bash(timeout:*)",
       "Bash(ping:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(set FLASK_ENV=development)",
+      "Bash(set SOCKETIO_ASYNC_MODE=threading)"
     ],
     "deny": [],
     "ask": []
