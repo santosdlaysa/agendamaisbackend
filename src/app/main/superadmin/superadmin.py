@@ -7,6 +7,8 @@ from sqlalchemy import func, desc, and_, or_
 from datetime import datetime, timedelta
 from flasgger import swag_from
 
+from flask_jwt_extended import create_access_token
+
 from src.config.database import db
 from src.models.user import User
 from src.models.subscription import Subscription
@@ -14,6 +16,7 @@ from src.models.client import Client
 from src.models.professional import Professional
 from src.models.appointment import Appointment
 from src.models.payment import Payment
+from src.models.service import Service
 from src.decorators.admin_required import admin_required
 
 superadmin_bp = Blueprint('superadmin', __name__)
@@ -1451,4 +1454,691 @@ def get_payments_stats():
             'count': last_30_days_count
         },
         'monthly': monthly_data
+    }), 200
+
+
+# ============================================================================
+# USERS (USUARIOS - LISTAGEM E GESTAO)
+# ============================================================================
+
+@superadmin_bp.route('/users', methods=['GET'])
+@jwt_required()
+@admin_required
+def get_users():
+    """
+    Lista todos os usuarios cadastrados na plataforma.
+    ---
+    tags:
+      - Super Admin - Users
+    security:
+      - Bearer: []
+    parameters:
+      - name: page
+        in: query
+        type: integer
+        default: 1
+      - name: limit
+        in: query
+        type: integer
+        default: 20
+      - name: search
+        in: query
+        type: string
+        description: Busca por nome, email ou empresa
+      - name: status
+        in: query
+        type: string
+        enum: [active, suspended, all]
+        default: all
+      - name: role
+        in: query
+        type: string
+        enum: [user, admin, superadmin, all]
+        default: all
+    responses:
+      200:
+        description: Lista de usuarios
+    """
+    page = request.args.get('page', 1, type=int)
+    limit = request.args.get('limit', 20, type=int)
+    search = request.args.get('search', '')
+    status = request.args.get('status', 'all')
+    role = request.args.get('role', 'all')
+
+    query = User.query
+
+    # Filtro de busca
+    if search:
+        search_filter = or_(
+            User.name.ilike(f'%{search}%'),
+            User.email.ilike(f'%{search}%'),
+            User.business_name.ilike(f'%{search}%')
+        )
+        query = query.filter(search_filter)
+
+    # Filtro de status (ativo/suspenso)
+    if status == 'active':
+        query = query.filter(User.active == True)
+    elif status == 'suspended':
+        query = query.filter(User.active == False)
+
+    # Filtro de role
+    if role and role != 'all':
+        query = query.filter(User.role == role)
+
+    query = query.order_by(desc(User.id))
+    pagination = query.paginate(page=page, per_page=limit, error_out=False)
+
+    users = []
+    for user in pagination.items:
+        subscription = Subscription.query.filter_by(user_id=user.id).first()
+        clients_count = Client.query.filter_by(user_id=user.id).count()
+        appointments_count = Appointment.query.filter_by(user_id=user.id).count()
+        services_count = Service.query.filter_by(user_id=user.id).count()
+
+        # Calcular receita total
+        total_revenue = db.session.query(func.sum(Appointment.price)).filter(
+            Appointment.user_id == user.id,
+            Appointment.status == 'completed'
+        ).scalar() or 0
+
+        users.append({
+            'id': user.id,
+            'name': user.name,
+            'email': user.email,
+            'business_name': user.business_name,
+            'role': user.role or 'user',
+            'status': 'active' if user.active else 'suspended',
+            'last_login': user.updated_at.isoformat() if user.updated_at else None,
+            'created_at': user.created_at.isoformat() if user.created_at else None,
+            'stats': {
+                'clients': clients_count,
+                'appointments': appointments_count,
+                'services': services_count,
+                'revenue': float(total_revenue)
+            }
+        })
+
+    return jsonify({
+        'users': users,
+        'pagination': {
+            'page': page,
+            'limit': limit,
+            'total': pagination.total,
+            'pages': pagination.pages,
+            'has_next': pagination.has_next,
+            'has_prev': pagination.has_prev
+        }
+    }), 200
+
+
+@superadmin_bp.route('/users/<int:user_id>', methods=['GET'])
+@jwt_required()
+@admin_required
+def get_user(user_id):
+    """
+    Obtem detalhes de um usuario especifico.
+    ---
+    tags:
+      - Super Admin - Users
+    security:
+      - Bearer: []
+    parameters:
+      - name: user_id
+        in: path
+        type: integer
+        required: true
+    responses:
+      200:
+        description: Detalhes do usuario
+      404:
+        description: Usuario nao encontrado
+    """
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': 'Usuario nao encontrado'}), 404
+
+    subscription = Subscription.query.filter_by(user_id=user.id).first()
+
+    # Estatisticas
+    clients_count = Client.query.filter_by(user_id=user.id).count()
+    professionals_count = Professional.query.filter_by(user_id=user.id).count()
+    services_count = Service.query.filter_by(user_id=user.id).count()
+    total_appointments = Appointment.query.filter_by(user_id=user.id).count()
+    completed_appointments = Appointment.query.filter(
+        Appointment.user_id == user.id,
+        Appointment.status == 'completed'
+    ).count()
+    canceled_appointments = Appointment.query.filter(
+        Appointment.user_id == user.id,
+        Appointment.status == 'cancelled'
+    ).count()
+
+    # Receita total
+    total_revenue = db.session.query(func.sum(Appointment.price)).filter(
+        Appointment.user_id == user.id,
+        Appointment.status == 'completed'
+    ).scalar() or 0
+
+    # Receita mensal (ultimo mes)
+    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+    monthly_revenue = db.session.query(func.sum(Appointment.price)).filter(
+        Appointment.user_id == user.id,
+        Appointment.status == 'completed',
+        Appointment.created_at >= thirty_days_ago
+    ).scalar() or 0
+
+    return jsonify({
+        'id': user.id,
+        'name': user.name,
+        'email': user.email,
+        'phone': user.business_phone,
+        'business_name': user.business_name,
+        'business_phone': user.business_phone,
+        'business_address': user.business_address,
+        'slug': user.slug,
+        'role': user.role or 'user',
+        'status': 'active' if user.active else 'suspended',
+        'email_verified': user.email_verified,
+        'created_at': user.created_at.isoformat() if user.created_at else None,
+        'last_login': user.updated_at.isoformat() if user.updated_at else None,
+        'stats': {
+            'total_clients': clients_count,
+            'total_professionals': professionals_count,
+            'total_services': services_count,
+            'total_appointments': total_appointments,
+            'completed_appointments': completed_appointments,
+            'canceled_appointments': canceled_appointments,
+            'total_revenue': float(total_revenue),
+            'monthly_revenue': float(monthly_revenue)
+        },
+        'subscription': {
+            'id': subscription.id,
+            'plan': subscription.plan,
+            'status': subscription.status,
+            'start_date': subscription.start_date.isoformat() if subscription.start_date else None,
+            'end_date': subscription.end_date.isoformat() if subscription.end_date else None
+        } if subscription else None
+    }), 200
+
+
+@superadmin_bp.route('/users/<int:user_id>/access-logs', methods=['GET'])
+@jwt_required()
+@admin_required
+def get_user_access_logs(user_id):
+    """
+    Obtem historico de acessos de um usuario.
+    ---
+    tags:
+      - Super Admin - Users
+    security:
+      - Bearer: []
+    parameters:
+      - name: user_id
+        in: path
+        type: integer
+        required: true
+    responses:
+      200:
+        description: Historico de acessos
+      404:
+        description: Usuario nao encontrado
+    """
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': 'Usuario nao encontrado'}), 404
+
+    # Por enquanto retorna lista vazia - tabela de logs nao existe ainda
+    # TODO: Criar tabela user_access_logs e registrar logins
+    return jsonify({
+        'logs': [],
+        'message': 'Historico de acessos ainda nao implementado no banco de dados'
+    }), 200
+
+
+@superadmin_bp.route('/users/<int:user_id>/impersonate', methods=['POST'])
+@jwt_required()
+@admin_required
+def impersonate_user(user_id):
+    """
+    Gera token para entrar como outro usuario (impersonation).
+    ---
+    tags:
+      - Super Admin - Users
+    security:
+      - Bearer: []
+    parameters:
+      - name: user_id
+        in: path
+        type: integer
+        required: true
+    responses:
+      200:
+        description: Token gerado para impersonation
+      404:
+        description: Usuario nao encontrado
+    """
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': 'Usuario nao encontrado'}), 404
+
+    # Gerar token JWT para o usuario alvo
+    access_token = create_access_token(identity=user.id)
+
+    return jsonify({
+        'token': access_token,
+        'user': {
+            'id': user.id,
+            'name': user.name,
+            'email': user.email,
+            'business_name': user.business_name,
+            'role': user.role
+        }
+    }), 200
+
+
+@superadmin_bp.route('/users/<int:user_id>/suspend', methods=['POST'])
+@jwt_required()
+@admin_required
+def suspend_user(user_id):
+    """
+    Suspende um usuario.
+    ---
+    tags:
+      - Super Admin - Users
+    security:
+      - Bearer: []
+    parameters:
+      - name: user_id
+        in: path
+        type: integer
+        required: true
+    responses:
+      200:
+        description: Usuario suspenso com sucesso
+      404:
+        description: Usuario nao encontrado
+    """
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': 'Usuario nao encontrado'}), 404
+
+    data = request.get_json() or {}
+    reason = data.get('reason', '')
+
+    user.active = False
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Usuario suspenso com sucesso',
+        'user_id': user_id,
+        'reason': reason
+    }), 200
+
+
+@superadmin_bp.route('/users/<int:user_id>/activate', methods=['POST'])
+@jwt_required()
+@admin_required
+def activate_user(user_id):
+    """
+    Ativa um usuario suspenso.
+    ---
+    tags:
+      - Super Admin - Users
+    security:
+      - Bearer: []
+    parameters:
+      - name: user_id
+        in: path
+        type: integer
+        required: true
+    responses:
+      200:
+        description: Usuario ativado com sucesso
+      404:
+        description: Usuario nao encontrado
+    """
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': 'Usuario nao encontrado'}), 404
+
+    user.active = True
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Usuario ativado com sucesso',
+        'user_id': user_id
+    }), 200
+
+
+# ============================================================================
+# COMPANY STATS (ESTATISTICAS DETALHADAS DA EMPRESA)
+# ============================================================================
+
+@superadmin_bp.route('/companies/<int:company_id>/revenue', methods=['GET'])
+@jwt_required()
+@admin_required
+def get_company_revenue(company_id):
+    """
+    Obtem dados financeiros de uma empresa.
+    ---
+    tags:
+      - Super Admin - Company Stats
+    security:
+      - Bearer: []
+    parameters:
+      - name: company_id
+        in: path
+        type: integer
+        required: true
+    responses:
+      200:
+        description: Dados financeiros
+      404:
+        description: Empresa nao encontrada
+    """
+    user = User.query.get(company_id)
+    if not user:
+        return jsonify({'error': 'Empresa nao encontrada'}), 404
+
+    # Receita total
+    total_revenue = db.session.query(func.sum(Appointment.price)).filter(
+        Appointment.user_id == company_id,
+        Appointment.status == 'completed'
+    ).scalar() or 0
+
+    # Receita mensal (ultimos 12 meses)
+    monthly_revenue = []
+    for i in range(11, -1, -1):
+        month_start = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0) - timedelta(days=i * 30)
+        month_end = month_start + timedelta(days=30)
+
+        revenue = db.session.query(func.sum(Appointment.price)).filter(
+            Appointment.user_id == company_id,
+            Appointment.status == 'completed',
+            Appointment.created_at >= month_start,
+            Appointment.created_at < month_end
+        ).scalar() or 0
+
+        monthly_revenue.append({
+            'month': month_start.strftime('%b'),
+            'value': float(revenue)
+        })
+
+    # Ticket medio
+    completed_count = Appointment.query.filter(
+        Appointment.user_id == company_id,
+        Appointment.status == 'completed'
+    ).count()
+    average_ticket = float(total_revenue) / completed_count if completed_count > 0 else 0
+
+    # Taxas
+    total_appointments = Appointment.query.filter_by(user_id=company_id).count()
+    canceled_count = Appointment.query.filter(
+        Appointment.user_id == company_id,
+        Appointment.status == 'cancelled'
+    ).count()
+
+    completion_rate = (completed_count / total_appointments * 100) if total_appointments > 0 else 0
+    cancellation_rate = (canceled_count / total_appointments * 100) if total_appointments > 0 else 0
+
+    return jsonify({
+        'total_revenue': float(total_revenue),
+        'monthly_revenue': monthly_revenue,
+        'average_ticket': round(average_ticket, 2),
+        'completion_rate': round(completion_rate, 1),
+        'cancellation_rate': round(cancellation_rate, 1)
+    }), 200
+
+
+@superadmin_bp.route('/companies/<int:company_id>/services-stats', methods=['GET'])
+@jwt_required()
+@admin_required
+def get_company_services_stats(company_id):
+    """
+    Obtem estatisticas de servicos de uma empresa.
+    ---
+    tags:
+      - Super Admin - Company Stats
+    security:
+      - Bearer: []
+    parameters:
+      - name: company_id
+        in: path
+        type: integer
+        required: true
+    responses:
+      200:
+        description: Estatisticas de servicos
+      404:
+        description: Empresa nao encontrada
+    """
+    user = User.query.get(company_id)
+    if not user:
+        return jsonify({'error': 'Empresa nao encontrada'}), 404
+
+    services = Service.query.filter_by(user_id=company_id).all()
+
+    services_data = []
+    for service in services:
+        # Contar agendamentos deste servico
+        total_appointments = Appointment.query.filter_by(
+            user_id=company_id,
+            service_id=service.id
+        ).count()
+
+        # Receita deste servico
+        revenue = db.session.query(func.sum(Appointment.price)).filter(
+            Appointment.user_id == company_id,
+            Appointment.service_id == service.id,
+            Appointment.status == 'completed'
+        ).scalar() or 0
+
+        services_data.append({
+            'id': service.id,
+            'name': service.name,
+            'price': float(service.price) if service.price else 0,
+            'duration': service.duration,
+            'total_appointments': total_appointments,
+            'revenue': float(revenue),
+            'is_active': service.active
+        })
+
+    # Ordenar por receita
+    services_data.sort(key=lambda x: x['revenue'], reverse=True)
+
+    return jsonify({
+        'services': services_data
+    }), 200
+
+
+@superadmin_bp.route('/companies/<int:company_id>/appointments-stats', methods=['GET'])
+@jwt_required()
+@admin_required
+def get_company_appointments_stats(company_id):
+    """
+    Obtem estatisticas de agendamentos de uma empresa.
+    ---
+    tags:
+      - Super Admin - Company Stats
+    security:
+      - Bearer: []
+    parameters:
+      - name: company_id
+        in: path
+        type: integer
+        required: true
+      - name: limit
+        in: query
+        type: integer
+        default: 20
+    responses:
+      200:
+        description: Estatisticas de agendamentos
+      404:
+        description: Empresa nao encontrada
+    """
+    user = User.query.get(company_id)
+    if not user:
+        return jsonify({'error': 'Empresa nao encontrada'}), 404
+
+    limit = request.args.get('limit', 20, type=int)
+
+    # Ultimos agendamentos
+    appointments = Appointment.query.filter_by(user_id=company_id).order_by(
+        desc(Appointment.created_at)
+    ).limit(limit).all()
+
+    appointments_data = []
+    for apt in appointments:
+        client = Client.query.get(apt.client_id)
+        professional = Professional.query.get(apt.professional_id)
+        service = Service.query.get(apt.service_id)
+
+        appointments_data.append({
+            'id': apt.id,
+            'client_name': client.name if client else 'N/A',
+            'professional_name': professional.name if professional else 'N/A',
+            'service_name': service.name if service else 'N/A',
+            'scheduled_at': apt.appointment_date.isoformat() if apt.appointment_date else None,
+            'status': apt.status,
+            'price': float(apt.price) if apt.price else 0
+        })
+
+    return jsonify({
+        'appointments': appointments_data
+    }), 200
+
+
+@superadmin_bp.route('/companies/<int:company_id>/clients-stats', methods=['GET'])
+@jwt_required()
+@admin_required
+def get_company_clients_stats(company_id):
+    """
+    Obtem estatisticas de clientes de uma empresa.
+    ---
+    tags:
+      - Super Admin - Company Stats
+    security:
+      - Bearer: []
+    parameters:
+      - name: company_id
+        in: path
+        type: integer
+        required: true
+      - name: limit
+        in: query
+        type: integer
+        default: 20
+    responses:
+      200:
+        description: Estatisticas de clientes
+      404:
+        description: Empresa nao encontrada
+    """
+    user = User.query.get(company_id)
+    if not user:
+        return jsonify({'error': 'Empresa nao encontrada'}), 404
+
+    limit = request.args.get('limit', 20, type=int)
+
+    clients = Client.query.filter_by(user_id=company_id).all()
+
+    clients_data = []
+    for client in clients:
+        # Contar agendamentos
+        total_appointments = Appointment.query.filter_by(
+            user_id=company_id,
+            client_id=client.id
+        ).count()
+
+        # Total gasto
+        total_spent = db.session.query(func.sum(Appointment.price)).filter(
+            Appointment.user_id == company_id,
+            Appointment.client_id == client.id,
+            Appointment.status == 'completed'
+        ).scalar() or 0
+
+        # Ultima visita
+        last_appointment = Appointment.query.filter_by(
+            user_id=company_id,
+            client_id=client.id
+        ).order_by(desc(Appointment.created_at)).first()
+
+        clients_data.append({
+            'id': client.id,
+            'name': client.name,
+            'email': client.email,
+            'phone': client.phone,
+            'total_appointments': total_appointments,
+            'total_spent': float(total_spent),
+            'last_visit': last_appointment.appointment_date.isoformat() if last_appointment and last_appointment.appointment_date else None
+        })
+
+    # Ordenar por total gasto
+    clients_data.sort(key=lambda x: x['total_spent'], reverse=True)
+
+    return jsonify({
+        'clients': clients_data[:limit]
+    }), 200
+
+
+@superadmin_bp.route('/companies/<int:company_id>/professionals-stats', methods=['GET'])
+@jwt_required()
+@admin_required
+def get_company_professionals_stats(company_id):
+    """
+    Obtem estatisticas de profissionais de uma empresa.
+    ---
+    tags:
+      - Super Admin - Company Stats
+    security:
+      - Bearer: []
+    parameters:
+      - name: company_id
+        in: path
+        type: integer
+        required: true
+    responses:
+      200:
+        description: Estatisticas de profissionais
+      404:
+        description: Empresa nao encontrada
+    """
+    user = User.query.get(company_id)
+    if not user:
+        return jsonify({'error': 'Empresa nao encontrada'}), 404
+
+    professionals = Professional.query.filter_by(user_id=company_id).all()
+
+    professionals_data = []
+    for prof in professionals:
+        # Contar agendamentos
+        total_appointments = Appointment.query.filter_by(
+            user_id=company_id,
+            professional_id=prof.id
+        ).count()
+
+        # Receita gerada
+        revenue = db.session.query(func.sum(Appointment.price)).filter(
+            Appointment.user_id == company_id,
+            Appointment.professional_id == prof.id,
+            Appointment.status == 'completed'
+        ).scalar() or 0
+
+        professionals_data.append({
+            'id': prof.id,
+            'name': prof.name,
+            'role': prof.role,
+            'email': prof.email,
+            'total_appointments': total_appointments,
+            'revenue': float(revenue),
+            'rating': 4.5  # Placeholder - sistema de avaliacao nao existe
+        })
+
+    # Ordenar por receita
+    professionals_data.sort(key=lambda x: x['revenue'], reverse=True)
+
+    return jsonify({
+        'professionals': professionals_data
     }), 200

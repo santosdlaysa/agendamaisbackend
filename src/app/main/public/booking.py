@@ -634,8 +634,20 @@ def create_appointment(slug):
             return jsonify({'error': f'Campo {field} é obrigatório'}), 400
 
     client_data = data.get('client', {})
-    if not client_data.get('name') or not client_data.get('phone'):
+    client_name = client_data.get('name', '').strip() if client_data.get('name') else ''
+    client_phone = client_data.get('phone', '').strip() if client_data.get('phone') else ''
+
+    if not client_name or not client_phone:
         return jsonify({'error': 'Nome e telefone do cliente são obrigatórios'}), 400
+
+    # Validar formato do telefone (mínimo 8 dígitos)
+    phone_digits = ''.join(filter(str.isdigit, client_phone))
+    if len(phone_digits) < 8:
+        return jsonify({'error': 'Telefone inválido. Informe um número com pelo menos 8 dígitos'}), 400
+
+    # Atualizar client_data com valores tratados
+    client_data['name'] = client_name
+    client_data['phone'] = client_phone
 
     try:
         appointment_date = datetime.strptime(data['date'], '%Y-%m-%d').date()
@@ -774,9 +786,12 @@ def create_appointment(slug):
             )
             db.session.add(service_payment)
         else:
-            # Se falhar ao criar checkout, ainda cria o agendamento mas sem pagamento
-            appointment.status = 'scheduled'
-            appointment.payment_status = None
+            # Se falhar ao criar checkout e pagamento é obrigatório, não criar agendamento
+            db.session.rollback()
+            return jsonify({
+                'error': 'Não foi possível processar o pagamento. Tente novamente.',
+                'details': checkout_result.get('error', 'Erro ao criar sessão de pagamento')
+            }), 500
 
     # Criar notificacao in-app para o dashboard do admin
     try:

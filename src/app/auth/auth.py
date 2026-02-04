@@ -1,3 +1,5 @@
+import re
+
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from flasgger import swag_from
@@ -46,23 +48,36 @@ def register():
     """Registrar novo usuário"""
     try:
         data = request.get_json()
-        
+
         # Validar dados obrigatórios
-        if not data.get('email') or not data.get('password') or not data.get('name'):
+        email = data.get('email', '').strip()
+        password = data.get('password', '')
+        name = data.get('name', '').strip()
+
+        if not email or not password or not name:
             return jsonify(message='Email, senha e nome são obrigatórios'), 400
-        
+
+        # Validar formato do email
+        email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_regex, email):
+            return jsonify(message='Formato de email inválido'), 400
+
+        # Validar tamanho da senha
+        if len(password) < 6:
+            return jsonify(message='A senha deve ter no mínimo 6 caracteres'), 400
+
         # Verificar se usuário já existe
-        existing_user = User.query.filter_by(email=data['email']).first()
+        existing_user = User.query.filter_by(email=email).first()
         if existing_user:
             return jsonify(message='Email já está em uso'), 400
-        
+
         # Criar novo usuário (role sempre 'user' - admins devem ser promovidos manualmente)
         user = User(
-            email=data['email'],
-            name=data['name'],
+            email=email,
+            name=name,
             role='user'
         )
-        user.set_password(data['password'])
+        user.set_password(password)
 
         # Gerar token de verificação de email
         token = user.generate_email_verification_token()
@@ -615,3 +630,156 @@ def update_payment_settings():
     except Exception as e:
         db.session.rollback()
         return jsonify(message=f'Erro ao atualizar configurações de pagamento: {str(e)}'), 500
+
+
+@auth_bp.route('/onboarding/status', methods=['GET'])
+@jwt_required()
+@swag_from({
+    'tags': ['Onboarding'],
+    'summary': 'Verificar status do onboarding',
+    'description': 'Retorna o status do onboarding do usuário',
+    'security': [{'Bearer': []}],
+    'responses': {
+        200: {
+            'description': 'Status do onboarding',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'onboarding_completed': {'type': 'boolean'},
+                    'onboarding_completed_at': {'type': 'string', 'format': 'date-time'},
+                    'missing_fields': {'type': 'array', 'items': {'type': 'string'}}
+                }
+            }
+        },
+        401: {'description': 'Token não fornecido ou inválido'},
+        404: {'description': 'Usuário não encontrado'}
+    }
+})
+def get_onboarding_status():
+    """Verificar status do onboarding"""
+    try:
+        user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
+
+        if not user:
+            return jsonify(message='Usuário não encontrado'), 404
+
+        # Verificar campos obrigatórios faltando
+        missing_fields = []
+        if not user.business_name or user.business_name.strip() == '':
+            missing_fields.append('business_name')
+        if not user.slug or user.slug.strip() == '':
+            missing_fields.append('slug')
+
+        return jsonify({
+            'onboarding_completed': user.onboarding_completed or False,
+            'onboarding_completed_at': user.onboarding_completed_at.isoformat() if user.onboarding_completed_at else None,
+            'missing_fields': missing_fields
+        }), 200
+
+    except Exception as e:
+        return jsonify(message=f'Erro ao verificar status do onboarding: {str(e)}'), 500
+
+
+@auth_bp.route('/onboarding/complete', methods=['PUT'])
+@jwt_required()
+@swag_from({
+    'tags': ['Onboarding'],
+    'summary': 'Completar onboarding',
+    'description': 'Marca o onboarding como completo após validar campos obrigatórios (business_name e slug)',
+    'security': [{'Bearer': []}],
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['business_name', 'slug'],
+                'properties': {
+                    'business_name': {'type': 'string', 'example': 'Minha Barbearia'},
+                    'slug': {'type': 'string', 'example': 'minha-barbearia'},
+                    'business_phone': {'type': 'string', 'example': '(11) 99999-9999'},
+                    'business_address': {'type': 'string', 'example': 'Rua das Flores, 123'}
+                }
+            }
+        }
+    ],
+    'responses': {
+        200: {
+            'description': 'Onboarding completo',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'message': {'type': 'string'},
+                    'onboarding_completed': {'type': 'boolean'},
+                    'user': {'$ref': '#/definitions/User'}
+                }
+            }
+        },
+        400: {'description': 'Campos obrigatórios não preenchidos ou slug já em uso'},
+        401: {'description': 'Token não fornecido ou inválido'},
+        404: {'description': 'Usuário não encontrado'}
+    }
+})
+def complete_onboarding():
+    """Completar onboarding"""
+    try:
+        from datetime import datetime
+
+        data = request.get_json()
+        user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
+
+        if not user:
+            return jsonify(message='Usuário não encontrado'), 404
+
+        # Validar campos obrigatórios
+        business_name = data.get('business_name', '').strip() if data.get('business_name') else ''
+        slug = data.get('slug', '').strip() if data.get('slug') else ''
+
+        if not business_name:
+            return jsonify(message='Nome da empresa é obrigatório'), 400
+
+        if not slug:
+            return jsonify(message='Slug (URL) é obrigatório'), 400
+
+        # Validar e formatar slug
+        slug = slug.lower()
+        slug = ''.join(c if c.isalnum() or c == '-' else '-' for c in slug)
+        slug = '-'.join(filter(None, slug.split('-')))
+
+        if len(slug) < 3:
+            return jsonify(message='Slug deve ter no mínimo 3 caracteres'), 400
+
+        # Verificar se slug já está em uso
+        existing = User.query.filter(User.slug == slug, User.id != user_id).first()
+        if existing:
+            return jsonify(message='Este slug já está em uso'), 400
+
+        # Atualizar dados do usuário
+        user.business_name = business_name
+        user.slug = slug
+
+        # Atualizar campos opcionais se fornecidos
+        if data.get('business_phone'):
+            user.business_phone = data['business_phone']
+
+        if data.get('business_address'):
+            user.business_address = data['business_address']
+
+        # Marcar onboarding como completo
+        user.onboarding_completed = True
+        user.onboarding_completed_at = datetime.utcnow()
+
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Onboarding concluído com sucesso',
+            'onboarding_completed': True,
+            'user': user.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify(message=f'Erro ao completar onboarding: {str(e)}'), 500
