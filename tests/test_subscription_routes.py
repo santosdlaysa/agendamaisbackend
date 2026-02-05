@@ -176,7 +176,7 @@ class TestSubscriptionRoutes:
                 client_id=test_subscription.client_id
             ).first()
             subscription.cancel_at_period_end = True
-            db_session.commit()
+            db_session.flush()
 
             mock_modify.return_value = MagicMock(cancel_at_period_end=False)
 

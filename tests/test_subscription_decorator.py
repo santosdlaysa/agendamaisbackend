@@ -167,19 +167,19 @@ class TestSubscriptionDecorator:
         assert 'code' in data
 
     def test_subscription_required_with_past_due_status(self, client, auth_headers,
-                                                       test_client_user, test_blueprint,
+                                                       test_user, test_blueprint,
                                                        app, db_session):
         """Testar acesso com status past_due"""
         with app.app_context():
             from src.models.subscription import Subscription
 
             subscription = Subscription(
-                client_id=test_client_user.id,
+                user_id=test_user.id,
                 plan='pro',
                 status='past_due'
             )
             db_session.add(subscription)
-            db_session.commit()
+            db_session.flush()
 
             response = client.get('/test/any-plan', headers=auth_headers)
 
@@ -273,7 +273,7 @@ class TestDecoratorIntegration:
                 phone='+5511988888888'
             )
             db.session.add(client2)
-            db.session.commit()
+            db.session.flush()
 
             token2 = create_access_token(identity=client2.id)
             headers2 = {'Authorization': f'Bearer {token2}'}

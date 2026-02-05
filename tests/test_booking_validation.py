@@ -30,7 +30,7 @@ def business_user(app, db_session):
             booking_require_payment=False
         )
         db.session.add(user)
-        db.session.commit()
+        db.session.flush()
         return user
 
 
@@ -49,7 +49,7 @@ def business_professional(app, db_session, business_user):
             active=True
         )
         db.session.add(professional)
-        db.session.commit()
+        db.session.flush()
 
         # Criar horarios de trabalho para todos os dias da semana
         for day in range(7):
@@ -61,7 +61,7 @@ def business_professional(app, db_session, business_user):
                 is_available=True
             )
             db.session.add(working_hours)
-        db.session.commit()
+        db.session.flush()
 
         return professional
 
@@ -81,7 +81,7 @@ def business_service(app, db_session, business_user):
             active=True
         )
         db.session.add(service)
-        db.session.commit()
+        db.session.flush()
         return service
 
 

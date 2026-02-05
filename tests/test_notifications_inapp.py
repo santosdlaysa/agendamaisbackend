@@ -33,7 +33,7 @@ class TestNotificationModel:
                 message='Cliente X agendou servico Y',
                 data={'appointment_id': 1}
             )
-            db_session.commit()
+            db_session.flush()
 
             assert notification.id is not None
             assert notification.user_id == user.id
@@ -62,7 +62,7 @@ class TestNotificationModel:
                 message='Cliente Z foi cadastrado',
                 data={'client_id': 5}
             )
-            db_session.commit()
+            db_session.flush()
 
             result = notification.to_dict()
 
@@ -92,13 +92,13 @@ class TestNotificationModel:
                 title='Aviso',
                 message='Mensagem do sistema'
             )
-            db_session.commit()
+            db_session.flush()
 
             assert notification.read is False
             assert notification.read_at is None
 
             notification.mark_as_read()
-            db_session.commit()
+            db_session.flush()
 
             assert notification.read is True
             assert notification.read_at is not None
@@ -125,7 +125,7 @@ class TestNotificationModel:
                     title=f'Notificacao {i}',
                     message=f'Mensagem {i}'
                 )
-            db_session.commit()
+            db_session.flush()
 
             count = Notification.get_unread_count(user.id)
             assert count == 3
@@ -152,7 +152,7 @@ class TestNotificationModel:
                     title=f'Notificacao {i}',
                     message=f'Mensagem {i}'
                 )
-            db_session.commit()
+            db_session.flush()
 
             assert Notification.get_unread_count(user.id) == 5
 
@@ -204,7 +204,7 @@ class TestNotificationFactoryMethods:
                 service=mock_service,
                 professional=mock_professional
             )
-            db_session.commit()
+            db_session.flush()
 
             assert notification.type == 'new_appointment'
             assert 'Maria Silva' in notification.message
@@ -235,7 +235,7 @@ class TestNotificationFactoryMethods:
                 user_id=user.id,
                 client=mock_client
             )
-            db_session.commit()
+            db_session.flush()
 
             assert notification.type == 'new_client'
             assert 'Joao Santos' in notification.message
@@ -270,7 +270,7 @@ class TestNotificationFactoryMethods:
                 client=mock_client,
                 reason='Cliente solicitou'
             )
-            db_session.commit()
+            db_session.flush()
 
             assert notification.type == 'appointment_cancelled'
             assert 'Ana Costa' in notification.message
@@ -304,7 +304,7 @@ class TestNotificationRoutes:
                     title=f'Notificacao {i}',
                     message=f'Mensagem {i}'
                 )
-            db_session.commit()
+            db_session.flush()
 
             # Criar token
             token = create_access_token(identity=user.id)
@@ -345,7 +345,7 @@ class TestNotificationRoutes:
                     title=f'Cliente {i}',
                     message=f'Novo cliente {i}'
                 )
-            db_session.commit()
+            db_session.flush()
 
             token = create_access_token(identity=user.id)
             headers = {
@@ -380,7 +380,7 @@ class TestNotificationRoutes:
                 title='Aviso',
                 message='Teste'
             )
-            db_session.commit()
+            db_session.flush()
 
             token = create_access_token(identity=user.id)
             headers = {
@@ -419,7 +419,7 @@ class TestNotificationRoutes:
                     title=f'Notif {i}',
                     message=f'Msg {i}'
                 )
-            db_session.commit()
+            db_session.flush()
 
             token = create_access_token(identity=user.id)
             headers = {
@@ -462,7 +462,7 @@ class TestNotificationRoutes:
                 title='Para excluir',
                 message='Sera excluida'
             )
-            db_session.commit()
+            db_session.flush()
 
             notif_id = notification.id
 

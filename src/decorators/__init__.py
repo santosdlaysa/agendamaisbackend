@@ -1,4 +1,4 @@
 # Decorators module
-from .subscription_required import subscription_required
+from .subscription_required import subscription_required, check_feature_access
 
-__all__ = ['subscription_required']
+__all__ = ['subscription_required', 'check_feature_access']

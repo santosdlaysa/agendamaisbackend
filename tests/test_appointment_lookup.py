@@ -217,7 +217,7 @@ class TestAppointmentConfirmationInfo:
             # Adicionar token de confirmacao ao agendamento
             appointment = Appointment.query.filter_by(booking_code=booking_code).first()
             appointment.generate_confirmation_token(expires_hours=24)
-            db_session.commit()
+            db_session.flush()
 
             response = client.get(f'/api/public/appointments/{booking_code}')
 
