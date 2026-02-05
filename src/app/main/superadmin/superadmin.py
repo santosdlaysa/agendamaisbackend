@@ -1723,7 +1723,7 @@ def impersonate_user(user_id):
         return jsonify({'error': 'Usuario nao encontrado'}), 404
 
     # Gerar token JWT para o usuario alvo
-    access_token = create_access_token(identity=user.id)
+    access_token = create_access_token(identity=str(user.id))
 
     return jsonify({
         'token': access_token,
