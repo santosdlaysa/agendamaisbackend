@@ -293,8 +293,10 @@ def create_app():
 
     return app
 
+# Instância no nível do módulo para servidores WSGI (ex.: gunicorn app:app)
+app = create_app()
+
 if __name__ == '__main__':
-    app = create_app()
     port = int(os.getenv('PORT', 5000))
     debug = os.getenv('FLASK_ENV') == 'development'
     print(f"Starting server on port {port}, debug={debug}")
